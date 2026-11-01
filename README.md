@@ -17,6 +17,38 @@
 5. Создание одной записи в MySQL для каждого учтённого транспортного средства.
 6. Отметка результатов с низкой достоверностью для последующей ручной проверки.
 
+### Запуск YOLO
+
+Общая структура используемой команды:
+
+```powershell
+yolo РЕЖИМ model=МОДЕЛЬ source=ИСТОЧНИК classes=КЛАССЫ tracker=ТРЕКЕР conf=ПОРОГ save=True name=ИМЯ
+```
+
+Нужные для проекта параметры:
+
+- `РЕЖИМ` — `predict` для обнаружения объектов на изображении или `track` для обнаружения и отслеживания транспорта на видео;
+- `model=yolov8s.pt` — готовая модель YOLOv8s;
+- `source=...` — путь к изображению, видеофайлу или разрешённому видеопотоку;
+- `classes=2,3,5,7` — обрабатывать только легковые автомобили, мотоциклы, автобусы и грузовые автомобили; люди исключаются;
+- `tracker=botsort.yaml` — отслеживание на записи с движущейся камеры;
+- `tracker=bytetrack.yaml` — простой вариант для будущей неподвижной городской камеры;
+- `conf=0.25` — минимальная уверенность обнаружения от 0 до 1; объекты с меньшим значением отбрасываются;
+- `save=True` — сохранить обработанный материал;
+- `name=...` — имя папки с результатом запуска.
+
+Пример обнаружения транспорта на изображении:
+
+```powershell
+yolo predict model=yolov8s.pt source=image.jpg classes=2,3,5,7 conf=0.25 save=True name=image_test
+```
+
+Пример отслеживания транспорта на видео с регистратора:
+
+```powershell
+yolo track model=yolov8s.pt source=test.mp4 classes=2,3,5,7 tracker=botsort.yaml conf=0.25 save=True name=dashcam_test
+```
+
 ### Текущее состояние
 
 - Выполнен анализ предметной области.
@@ -52,6 +84,38 @@ Develop a system that receives video from one camera in Glazov, detects and trac
 4. Recognize the registration plate and vehicle color when the image quality is sufficient.
 5. Create one MySQL observation record for each counted vehicle.
 6. Mark low-confidence results for manual review.
+
+### Running YOLO
+
+General structure of the command used in this project:
+
+```powershell
+yolo MODE model=MODEL source=SOURCE classes=CLASSES tracker=TRACKER conf=THRESHOLD save=True name=NAME
+```
+
+Parameters required by the project:
+
+- `MODE` — use `predict` to detect objects in an image or `track` to detect and track vehicles in a video;
+- `model=yolov8s.pt` — use the pretrained YOLOv8s model;
+- `source=...` — specify an image, video file, or authorized video stream;
+- `classes=2,3,5,7` — process only cars, motorcycles, buses, and trucks; people are excluded;
+- `tracker=botsort.yaml` — track vehicles in moving-camera footage;
+- `tracker=bytetrack.yaml` — use a simple tracker for the future fixed city camera;
+- `conf=0.25` — set the minimum detection confidence from 0 to 1; lower-confidence detections are discarded;
+- `save=True` — save the processed media;
+- `name=...` — set the output run directory name.
+
+Example of vehicle detection in an image:
+
+```powershell
+yolo predict model=yolov8s.pt source=image.jpg classes=2,3,5,7 conf=0.25 save=True name=image_test
+```
+
+Example of vehicle tracking in dashcam footage:
+
+```powershell
+yolo track model=yolov8s.pt source=test.mp4 classes=2,3,5,7 tracker=botsort.yaml conf=0.25 save=True name=dashcam_test
+```
 
 ### Current status
 
