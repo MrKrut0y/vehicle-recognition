@@ -1,0 +1,32 @@
+# Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# YOLO models and generated results
+*.pt
+*.onnx
+results/
+runs/
+
+# Local test media
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Local configuration and secrets
+.env
+*.local
+
+# Microsoft Office temporary files
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# Reference materials supplied for formatting
+Требования/
+
+# Empty working document that is not part of the coursework
+Документ Microsoft Office Word.docx
