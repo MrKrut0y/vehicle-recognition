@@ -25,8 +25,7 @@ runs/
 ~$*.xlsx
 ~$*.pptx
 
-# Reference materials supplied for formatting
-Требования/
-
-# Empty working document that is not part of the coursework
-Документ Microsoft Office Word.docx
+# 
+videos/
+m/
+requirements/
