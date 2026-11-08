@@ -4,10 +4,13 @@ import cv2
 
 
 class FileSource:
+    """Последовательно получает кадры из локального видеофайла."""
+
     def __init__(self, source: Path):
         self.source = source
 
     def generate_frames(self):
+        """Генерирует кадры видео и освобождает ресурс после завершения."""
         if not self.source.is_file():
             print(f"Файл не найден: {self.source}")
             return

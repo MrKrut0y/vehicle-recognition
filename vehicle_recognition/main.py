@@ -6,6 +6,7 @@ from vehicle_recognition.detector import VehicleDetector
 
 
 def parse_arguments() -> argparse.Namespace:
+    """Получает параметры запуска программы из командной строки."""
     parser = argparse.ArgumentParser(
         description="Обработка видео с транспортными средствами."
     )
@@ -16,29 +17,30 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Запускает чтение видео и распознавание транспорта."""
     arguments = parse_arguments()
     file_source = FileSource(arguments.source)
-
-    frame_count = 0
 
     model_path = "yolov8s.pt"
     detector = VehicleDetector(model_path)
 
     for frame in file_source.generate_frames():
-        result = detector.detect(frame)
-        print(f"Количество обнаруженных объектов: {len(result.boxes)}")
-        frame_count += 1
-        for box in result.boxes:
-            coords = box.xyxy[0].tolist()
-            class_id = int(box.cls[0].item())
-            class_name = result.names[class_id]
-            confidence = box.conf[0].item()
-            print(f"Класс: {class_name}")
-            print(f"Уверенность: {confidence:.2f}")
-            print(f"Координаты: {coords}")
-            print(f"ID: {class_id}")
+        detections = detector.detect(frame)
+
+        print(f"Количество обнаруженных объектов: {len(detections)}")
+
+        for detection in detections:
+            print(f"Класс: {detection.class_name}")
+            print(f"Уверенность: {detection.confidence:.2f}")
+            print(
+                f"Координаты: "
+                f"{detection.x1}, {detection.y1}, "
+                f"{detection.x2}, {detection.y2}"
+            )
+            print(f"ID: {detection.class_id}")
+
+        # На текущем этапе обрабатываем только первый кадр.
         break
-    print(f"Количество кадров: {frame_count}")
 
 
 if __name__ == "__main__":
