@@ -15,7 +15,7 @@ class VehicleDetector:
     def detect(self, frame) -> list[Detection]:
         """Возвращает список транспортных средств, обнаруженных на кадре."""
         results = self.model.predict(
-            source=frame, verbose=False, classes=VEHICLE_CLASS_IDS
+            source=frame, verbose=False, classes=VEHICLE_CLASS_IDS, agnostic_nms=True
         )
 
         result = results[0]

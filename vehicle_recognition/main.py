@@ -1,8 +1,10 @@
 import argparse
+import cv2
 from pathlib import Path
 
 from vehicle_recognition.file_source import FileSource
 from vehicle_recognition.detector import VehicleDetector
+from vehicle_recognition.visualizer import draw_detections
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -29,6 +31,13 @@ def main() -> None:
 
         print(f"Количество обнаруженных объектов: {len(detections)}")
 
+        annotated_frame = draw_detections(frame, detections)
+
+        cv2.imshow("Vehicle detection", annotated_frame)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        """
         for detection in detections:
             print(f"Класс: {detection.class_name}")
             print(f"Уверенность: {detection.confidence:.2f}")
@@ -38,7 +47,7 @@ def main() -> None:
                 f"{detection.x2}, {detection.y2}"
             )
             print(f"ID: {detection.class_id}")
-
+        """
         # На текущем этапе обрабатываем только первый кадр.
         break
 

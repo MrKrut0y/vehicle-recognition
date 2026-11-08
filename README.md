@@ -1,4 +1,4 @@
-# Распознавание транспорта в Глазове / Glazov Vehicle Recognition
+# Распознавание транспорта / Vehicle Recognition
 
 ## Русский
 
