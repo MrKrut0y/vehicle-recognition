@@ -30,8 +30,6 @@ def main() -> None:
     for frame in file_source.generate_frames():
         detections = detector.detect(frame)
 
-        print(f"Количество обнаруженных объектов: {len(detections)}")
-
         annotated_frame = draw_detections(frame, detections)
 
         cv2.imshow("Vehicle detection", annotated_frame)

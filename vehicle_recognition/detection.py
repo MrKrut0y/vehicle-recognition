@@ -12,3 +12,4 @@ class Detection:
     y1: float
     x2: float
     y2: float
+    track_id: int | None = None

@@ -24,7 +24,12 @@ def draw_detections(frame, detections: list[Detection]):
         cv2.rectangle(annotated_frame, point1, point2, color, 2)
 
         # Подписи
-        label = f"{detection.class_name} {detection.confidence:.2f}"
+        if detection.track_id is None:
+            track_label = "ID -"
+        else:
+            track_label = f"ID {detection.track_id}"
+
+        label = f"{track_label} {detection.class_name} {detection.confidence:.2f}"
 
         text_position = (
             int(detection.x1),
