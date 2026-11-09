@@ -1,6 +1,7 @@
 import argparse
-import cv2
 from pathlib import Path
+
+import cv2
 
 from vehicle_recognition.file_source import FileSource
 from vehicle_recognition.detector import VehicleDetector
@@ -34,22 +35,10 @@ def main() -> None:
         annotated_frame = draw_detections(frame, detections)
 
         cv2.imshow("Vehicle detection", annotated_frame)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
-        """
-        for detection in detections:
-            print(f"Класс: {detection.class_name}")
-            print(f"Уверенность: {detection.confidence:.2f}")
-            print(
-                f"Координаты: "
-                f"{detection.x1}, {detection.y1}, "
-                f"{detection.x2}, {detection.y2}"
-            )
-            print(f"ID: {detection.class_id}")
-        """
-        # На текущем этапе обрабатываем только первый кадр.
-        break
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
