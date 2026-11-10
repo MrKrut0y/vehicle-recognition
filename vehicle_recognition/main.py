@@ -3,8 +3,9 @@ from pathlib import Path
 
 import cv2
 
-from vehicle_recognition.file_source import FileSource
+from vehicle_recognition.counter import VehicleCounter
 from vehicle_recognition.detector import VehicleDetector
+from vehicle_recognition.file_source import FileSource
 from vehicle_recognition.visualizer import draw_detections
 
 
@@ -27,15 +28,21 @@ def main() -> None:
     model_path = "yolov8s.pt"
     detector = VehicleDetector(model_path)
 
+    counter = VehicleCounter()
+
     for frame in file_source.generate_frames():
         detections = detector.detect(frame)
 
-        annotated_frame = draw_detections(frame, detections)
+        counter.update(detections)
+        total = counter.get_total()
+
+        annotated_frame = draw_detections(frame, detections, total)
 
         cv2.imshow("Vehicle detection", annotated_frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
+    print(f"Итоговое количество транспортных средств: {counter.get_total()}")
     cv2.destroyAllWindows()
 
 

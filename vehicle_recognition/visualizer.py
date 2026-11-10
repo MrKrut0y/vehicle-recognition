@@ -10,9 +10,22 @@ CLASS_COLORS = {
 }
 
 
-def draw_detections(frame, detections: list[Detection]):
-    """Рисует рамки и подписи обнаруженных транспортных средств на кадре."""
+def draw_detections(frame, detections: list[Detection], total: int):
+    """Рисует количество, рамки и подписи обнаруженных транспортных средств на кадре."""
     annotated_frame = frame.copy()
+
+    # Количество
+    counter_label = f"Count: {total}"
+
+    cv2.putText(
+        annotated_frame,
+        counter_label,
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 255, 255),
+        2,
+    )
 
     for detection in detections:
         # Прямоугольники
