@@ -47,7 +47,10 @@ def main() -> None:
         for frame in file_source.generate_frames():
             detections = detector.detect(frame)
 
-            counter.update(detections)
+            height, width = frame.shape[:2]
+            frame_size = (width, height)
+
+            counter.update(detections, frame_size)
             total = counter.get_total()
 
             annotated_frame = draw_detections(frame, detections, total)
