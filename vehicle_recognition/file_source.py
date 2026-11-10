@@ -8,6 +8,7 @@ class FileSource:
 
     def __init__(self, source: Path):
         self.source = source
+        self.fps: float | None = None
 
     def generate_frames(self):
         """Генерирует кадры видео и освобождает ресурс после завершения."""
@@ -21,6 +22,8 @@ class FileSource:
             print(f"Не удалось открыть видео {self.source}")
             capture.release()
             return
+
+        self.fps = capture.get(cv2.CAP_PROP_FPS)
 
         try:
             while True:
