@@ -25,9 +25,8 @@ runs/
 ~$*.xlsx
 ~$*.pptx
 
-# 
+# Local coursework data and reference implementation
 videos/
 m/
 requirements/
-/Reports/Отчёт_о_ходе_работы.md
-results/
+Reports/
