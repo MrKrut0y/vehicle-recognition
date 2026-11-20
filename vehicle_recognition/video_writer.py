@@ -25,7 +25,9 @@ class VideoFileWriter:
             raise RuntimeError(f"Не удалось создать видеофайл: {output_path}")
 
     def write(self, frame) -> None:
+        """Записывает один обработанный кадр."""
         self.writer.write(frame)
 
     def release(self) -> None:
+        """Завершает запись и освобождает выходной файл."""
         self.writer.release()

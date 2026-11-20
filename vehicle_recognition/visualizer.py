@@ -2,6 +2,7 @@ import cv2
 
 from vehicle_recognition.detection import Detection
 
+# OpenCV задаёт цвета в порядке BGR, а не RGB.
 CLASS_COLORS = {
     2: (0, 255, 0),  # car — зелёный
     3: (0, 255, 255),  # motorcycle — жёлтый
@@ -14,7 +15,6 @@ def draw_detections(frame, detections: list[Detection], total: int):
     """Рисует количество, рамки и подписи обнаруженных транспортных средств на кадре."""
     annotated_frame = frame.copy()
 
-    # Количество
     counter_label = f"Count: {total}"
 
     cv2.putText(
@@ -28,7 +28,6 @@ def draw_detections(frame, detections: list[Detection], total: int):
     )
 
     for detection in detections:
-        # Прямоугольники
         point1 = (int(detection.x1), int(detection.y1))
         point2 = (int(detection.x2), int(detection.y2))
 
@@ -36,7 +35,6 @@ def draw_detections(frame, detections: list[Detection], total: int):
 
         cv2.rectangle(annotated_frame, point1, point2, color, 2)
 
-        # Подписи
         if detection.track_id is None:
             track_label = "ID -"
         else:

@@ -44,23 +44,25 @@ def main() -> None:
     video_writer: VideoFileWriter | None = None
 
     try:
-        for frame in file_source.generate_frames():
+        for frame_number, frame in enumerate(file_source.generate_frames(), start=1):
             detections = detector.detect(frame)
 
             height, width = frame.shape[:2]
             frame_size = (width, height)
 
-            counter.update(detections, frame_size)
+            counter.update(detections, frame_size, frame_number)
             total = counter.get_total()
 
             annotated_frame = draw_detections(frame, detections, total)
 
             if arguments.output is not None:
+                # Размер выходного видео становится известен после первого кадра.
                 if video_writer is None:
                     height, width = annotated_frame.shape[:2]
 
                     fps = file_source.fps
                     if fps is None or fps <= 0:
+                        # Некоторые источники не сообщают FPS, поэтому используем запасное значение.
                         fps = 30.0
 
                     video_writer = VideoFileWriter(
@@ -76,6 +78,7 @@ def main() -> None:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
     finally:
+        # Освобождаем ресурсы даже при ошибке или досрочном завершении обработки.
         if video_writer is not None:
             video_writer.release()
 

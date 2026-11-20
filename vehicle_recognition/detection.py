@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class Detection:
@@ -13,3 +15,4 @@ class Detection:
     x2: float
     y2: float
     track_id: int | None = None
+    appearance_histogram: np.ndarray | None = None
