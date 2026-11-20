@@ -1,0 +1,17 @@
+# Настройки BoT-SORT для неподвижной городской камеры.
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.10
+new_track_thresh: 0.25
+track_buffer: 90
+match_thresh: 0.80
+fuse_score: true
+
+# Камера неподвижна, поэтому компенсация движения камеры не требуется.
+gmc_method: none
+
+# Признаки внешнего вида помогают сохранять ID при поворотах и коротких перекрытиях.
+proximity_thresh: 0.50
+appearance_thresh: 0.80
+with_reid: true
+model: auto
