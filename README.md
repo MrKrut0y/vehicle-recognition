@@ -53,6 +53,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--output` | Нет | Путь для сохранения обработанного видео |
 | `--show` | Нет | Показывать обработанные кадры во время работы |
 | `--verbose` | Нет | Выводить подробный журнал событий вместо однострочного прогресса |
+| `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
 Работа без показа кадров обычно выполняется быстрее.
@@ -137,6 +138,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--output` | No | Path for the annotated output video |
 | `--show` | No | Display processed frames while running |
 | `--verbose` | No | Print detailed tracking events instead of the one-line progress display |
+| `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
 preview is usually faster.

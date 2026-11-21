@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -16,3 +16,6 @@ class Detection:
     y2: float
     track_id: int | None = None
     appearance_histogram: np.ndarray | None = None
+    crop: np.ndarray | None = field(default=None, repr=False, compare=False)
+    pixel_motion_ratio: float = 0.0
+    has_pixel_motion: bool = False

@@ -8,7 +8,9 @@ import cv2
 from vehicle_recognition.counter import VehicleCounter
 from vehicle_recognition.detector import VehicleDetector
 from vehicle_recognition.file_source import FileSource
+from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
+from vehicle_recognition.motion import PixelMotionAnalyzer
 from vehicle_recognition.progress import build_progress_message, print_progress
 from vehicle_recognition.video_writer import VideoFileWriter
 from vehicle_recognition.visualizer import draw_detections
@@ -40,6 +42,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Выводить подробный журнал обработки.",
     )
 
+    parser.add_argument(
+        "--images-dir",
+        type=Path,
+        default=Path("results/vehicle_images"),
+        help="Каталог для лучших снимков подтверждённых машин.",
+    )
+
     return parser.parse_args()
 
 
@@ -50,9 +59,10 @@ def main() -> None:
     configure_logging(arguments.verbose)
 
     logger.info(
-        "Запуск обработки: source=%s output=%s show=%s",
+        "Запуск обработки: source=%s output=%s images_dir=%s show=%s",
         arguments.source,
         arguments.output,
+        arguments.images_dir,
         arguments.show,
     )
 
@@ -60,6 +70,7 @@ def main() -> None:
 
     model_path = "yolov8s.pt"
     detector = VehicleDetector(model_path)
+    motion_analyzer = PixelMotionAnalyzer()
 
     counter = VehicleCounter()
 
@@ -73,6 +84,7 @@ def main() -> None:
             processed_frames = frame_number
 
             detections = detector.detect(frame)
+            motion_analyzer.update(frame, detections, frame_number)
 
             height, width = frame.shape[:2]
             frame_size = (width, height)
@@ -138,22 +150,31 @@ def main() -> None:
     elapsed_seconds = time.perf_counter() - started_at
     average_fps = processed_frames / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
+    counter.finalize_all()
+    saved_image_paths = save_vehicle_images(
+        arguments.images_dir,
+        counter.counted_vehicle_ids,
+        counter.vehicles,
+    )
+
     logger.info(
         (
             "Обработка завершена: frames=%d vehicles=%d "
-            "elapsed=%.2fs average_fps=%.2f output=%s"
+            "elapsed=%.2fs average_fps=%.2f output=%s images=%d"
         ),
         processed_frames,
         counter.get_total(),
         elapsed_seconds,
         average_fps,
         arguments.output,
+        len(saved_image_paths),
     )
 
     if not arguments.verbose:
         print()
 
     print(f"Итоговое количество транспортных средств: {counter.get_total()}")
+    print(f"Сохранено снимков транспортных средств: {len(saved_image_paths)}")
 
 
 if __name__ == "__main__":

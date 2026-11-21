@@ -19,6 +19,8 @@ class VehicleDetector:
             source=frame,
             verbose=False,
             classes=VEHICLE_CLASS_IDS,
+            conf=0.25,
+            iou=0.45,
             # Удаляет совпадающие рамки, даже если YOLO назначила им разные классы.
             agnostic_nms=True,
             # Сохраняет состояние трекера между последовательными кадрами.
@@ -63,6 +65,7 @@ class VehicleDetector:
                 y2=y2,
                 track_id=track_id,
                 appearance_histogram=appearance_histogram,
+                crop=crop,
             )
 
             detections.append(detection)

@@ -122,3 +122,38 @@ def test_recent_centers_keeps_only_last_eight_observations():
     assert len(state.recent_centers) == 8
     assert state.recent_centers[0] == (3, (3.0, 0.0))
     assert state.recent_centers[-1] == (10, (10.0, 0.0))
+
+
+def test_predicted_center_uses_recent_velocity():
+    state = TrackState()
+    state.add_observation((10.0, 20.0), 2, (0.0, 0.0, 20.0, 40.0))
+    state.add_observation((18.0, 16.0), 6, (8.0, 0.0, 28.0, 40.0))
+
+    assert state.predicted_center(8) == pytest.approx((22.0, 14.0))
+
+
+def test_observation_accumulates_motion_class_and_best_crop():
+    state = TrackState()
+    crop = np.full((10, 10, 3), 127, dtype=np.uint8)
+
+    state.add_observation(
+        (5.0, 5.0),
+        1,
+        (0.0, 0.0, 10.0, 10.0),
+        tracker_id=7,
+        class_name="car",
+        confidence=0.8,
+        crop=crop,
+        frame_area=1000.0,
+        pixel_motion_ratio=0.25,
+        has_pixel_motion=True,
+    )
+    crop.fill(0)
+
+    assert state.pixel_motion_frames == 1
+    assert state.max_pixel_motion_ratio == pytest.approx(0.25)
+    assert state.tracker_id_frames == {7: 1}
+    assert state.stable_class_name() == "car"
+    assert state.stable_confidence() == pytest.approx(0.8)
+    assert state.best_crop is not None
+    assert np.all(state.best_crop == 127)

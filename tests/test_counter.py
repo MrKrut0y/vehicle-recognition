@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from vehicle_recognition.counter import VehicleCounter
@@ -89,7 +90,7 @@ def test_merge_vehicle_ids_removes_secondary_vehicle_and_related_state():
     assert counter.concurrent_pair_evidence[(1, 3)] == (1, 10)
 
 
-def test_concurrent_tracks_merge_only_after_required_consecutive_frames(monkeypatch):
+def test_concurrent_tracks_merge_only_after_required_matching_frames(monkeypatch):
     monkeypatch.setattr(
         "vehicle_recognition.counter.concurrent_tracks_match",
         lambda first_state, second_state: True,
@@ -131,6 +132,144 @@ def test_concurrent_tracks_merge_only_after_required_consecutive_frames(monkeypa
     assert counter.raw_to_vehicle[101] == counter.raw_to_vehicle[202]
 
 
+def test_default_concurrent_merge_rejects_five_frame_overlap(monkeypatch):
+    monkeypatch.setattr(
+        "vehicle_recognition.counter.concurrent_tracks_match",
+        lambda first_state, second_state: True,
+    )
+    counter = VehicleCounter(turn_recovery_confirm_frames=100)
+    detections = [
+        Detection(2, "car", 0.9, 10.0, 10.0, 30.0, 30.0, 101),
+        Detection(2, "car", 0.9, 11.0, 10.0, 31.0, 30.0, 202),
+    ]
+
+    for frame_number in range(1, 6):
+        counter.update(detections, (100, 100), frame_number)
+
+    assert len(counter.vehicles) == 2
+
+    counter.update(detections, (100, 100), 6)
+
+    assert len(counter.vehicles) == 1
+
+
+def test_concurrent_match_evidence_survives_short_detection_gaps(monkeypatch):
+    def matches_on_odd_frames(first_state, second_state):
+        return first_state.last_seen_frame % 2 == 1
+
+    monkeypatch.setattr(
+        "vehicle_recognition.counter.concurrent_tracks_match",
+        matches_on_odd_frames,
+    )
+    counter = VehicleCounter(
+        turn_recovery_confirm_frames=100,
+        concurrent_merge_frames=5,
+        large_vehicle_evidence_max_gap=3,
+    )
+    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
+    detections = [
+        Detection(
+            5,
+            "bus",
+            0.9,
+            10.0,
+            10.0,
+            50.0,
+            30.0,
+            101,
+            appearance_histogram=histogram,
+        ),
+        Detection(
+            5,
+            "bus",
+            0.9,
+            11.0,
+            10.0,
+            31.0,
+            30.0,
+            202,
+            appearance_histogram=histogram,
+        ),
+    ]
+
+    for frame_number in range(1, 9):
+        counter.update(detections, (100, 100), frame_number)
+        assert len(counter.vehicles) == 2
+
+    counter.update(detections, (100, 100), 9)
+
+    assert len(counter.vehicles) == 1
+
+
+def test_same_size_bus_tracks_require_consecutive_matching_frames(monkeypatch):
+    def matches_on_odd_frames(first_state, second_state):
+        return first_state.last_seen_frame % 2 == 1
+
+    monkeypatch.setattr(
+        "vehicle_recognition.counter.concurrent_tracks_match",
+        matches_on_odd_frames,
+    )
+    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
+    counter = VehicleCounter(
+        turn_recovery_confirm_frames=100,
+        concurrent_merge_frames=5,
+        large_vehicle_evidence_max_gap=3,
+    )
+    detections = [
+        Detection(
+            5,
+            "bus",
+            0.9,
+            10.0,
+            10.0,
+            30.0,
+            30.0,
+            101,
+            appearance_histogram=histogram,
+        ),
+        Detection(
+            5,
+            "bus",
+            0.9,
+            11.0,
+            10.0,
+            31.0,
+            30.0,
+            202,
+            appearance_histogram=histogram,
+        ),
+    ]
+
+    for frame_number in range(1, 10):
+        counter.update(detections, (100, 100), frame_number)
+
+    assert len(counter.vehicles) == 2
+
+
+def test_car_match_evidence_does_not_survive_detection_gaps(monkeypatch):
+    def matches_on_odd_frames(first_state, second_state):
+        return first_state.last_seen_frame % 2 == 1
+
+    monkeypatch.setattr(
+        "vehicle_recognition.counter.concurrent_tracks_match",
+        matches_on_odd_frames,
+    )
+    counter = VehicleCounter(
+        turn_recovery_confirm_frames=100,
+        concurrent_merge_frames=5,
+        large_vehicle_evidence_max_gap=3,
+    )
+    detections = [
+        Detection(2, "car", 0.9, 10.0, 10.0, 30.0, 30.0, 101),
+        Detection(2, "car", 0.9, 11.0, 10.0, 31.0, 30.0, 202),
+    ]
+
+    for frame_number in range(1, 10):
+        counter.update(detections, (100, 100), frame_number)
+
+    assert len(counter.vehicles) == 2
+
+
 def test_merged_tracker_ids_add_only_one_observation_per_frame():
     counter = VehicleCounter(turn_recovery_confirm_frames=100)
     counter.vehicles = {1: TrackState()}
@@ -167,3 +306,164 @@ def test_merged_tracker_ids_add_only_one_observation_per_frame():
     assert state.frames_seen == 1
     assert state.last_center == (30.0, 20.0)
     assert list(state.recent_centers) == [(1, (30.0, 20.0))]
+
+
+def test_new_tracker_id_is_stitched_to_recent_lost_vehicle():
+    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
+    crop = np.full((10, 10, 3), 127, dtype=np.uint8)
+    counter = VehicleCounter(turn_recovery_confirm_frames=100)
+    state = TrackState()
+    state.add_observation(
+        (10.0, 10.0),
+        1,
+        (5.0, 5.0, 15.0, 15.0),
+        histogram,
+    )
+    state.add_observation(
+        (12.0, 10.0),
+        2,
+        (7.0, 5.0, 17.0, 15.0),
+        histogram,
+    )
+    counter.vehicles = {1: state}
+    counter.raw_to_vehicle = {101: 1}
+    counter.next_vehicle_id = 2
+    detection = Detection(
+        class_id=2,
+        class_name="car",
+        confidence=0.9,
+        x1=9.0,
+        y1=5.0,
+        x2=19.0,
+        y2=15.0,
+        track_id=202,
+        appearance_histogram=histogram,
+        crop=crop,
+    )
+
+    counter.update([detection], (100, 100), 3)
+
+    assert counter.raw_to_vehicle[202] == 1
+    assert set(counter.vehicles) == {1}
+    assert counter.vehicles[1].frames_seen == 3
+
+
+def test_stitch_uses_last_position_when_prediction_is_wrong_after_turn():
+    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
+    counter = VehicleCounter(turn_recovery_confirm_frames=100)
+    state = TrackState()
+    state.add_observation(
+        (10.0, 10.0),
+        1,
+        (5.0, 5.0, 15.0, 15.0),
+        histogram,
+    )
+    state.add_observation(
+        (30.0, 10.0),
+        2,
+        (25.0, 5.0, 35.0, 15.0),
+        histogram,
+    )
+    counter.vehicles = {1: state}
+    counter.raw_to_vehicle = {101: 1}
+    counter.next_vehicle_id = 2
+    detection = Detection(
+        class_id=2,
+        class_name="car",
+        confidence=0.9,
+        x1=26.0,
+        y1=6.0,
+        x2=36.0,
+        y2=16.0,
+        track_id=202,
+        appearance_histogram=histogram,
+    )
+
+    counter.update([detection], (100, 100), 3)
+
+    assert counter.raw_to_vehicle[202] == 1
+    assert set(counter.vehicles) == {1}
+
+
+def test_stale_track_is_finalized_after_missing_frame_limit():
+    counter = VehicleCounter(max_missing_frames=3)
+    counter.vehicles = {1: TrackState(last_seen_frame=1, frames_seen=1)}
+
+    counter.update([], (100, 100), 4)
+
+    assert counter.vehicles[1].finalized is True
+
+
+def test_unmatched_recovery_candidate_remains_pending_for_later_frames():
+    counter = VehicleCounter(turn_recovery_confirm_frames=1)
+    detection = Detection(
+        class_id=2,
+        class_name="car",
+        confidence=0.9,
+        x1=0.0,
+        y1=0.0,
+        x2=10.0,
+        y2=10.0,
+        track_id=101,
+    )
+
+    counter.update([detection], (100, 100), 1)
+
+    vehicle_id = counter.raw_to_vehicle[101]
+    assert vehicle_id in counter.pending_recovery_vehicle_ids
+
+
+def test_vehicle_is_counted_after_track_motion_and_pixel_motion_are_confirmed():
+    counter = VehicleCounter(
+        min_confirmed_frames=2,
+        min_movement_ratio=0.01,
+        min_pixel_motion_frames=2,
+        turn_recovery_confirm_frames=100,
+    )
+    crop = np.full((10, 10, 3), 127, dtype=np.uint8)
+
+    for frame_number, offset in ((1, 0.0), (2, 5.0)):
+        detection = Detection(
+            class_id=2,
+            class_name="car",
+            confidence=0.9,
+            x1=offset,
+            y1=0.0,
+            x2=offset + 10.0,
+            y2=10.0,
+            track_id=101,
+            crop=crop,
+            pixel_motion_ratio=0.5,
+            has_pixel_motion=True,
+        )
+        counter.update([detection], (100, 100), frame_number)
+
+    assert counter.get_total() == 1
+
+
+def test_vehicle_is_not_counted_without_confirmed_pixel_motion():
+    counter = VehicleCounter(
+        min_confirmed_frames=2,
+        min_movement_ratio=0.01,
+        min_pixel_motion_frames=1,
+        turn_recovery_confirm_frames=100,
+    )
+    crop = np.full((10, 10, 3), 127, dtype=np.uint8)
+
+    for frame_number, offset in ((1, 0.0), (2, 5.0)):
+        detection = Detection(
+            class_id=2,
+            class_name="car",
+            confidence=0.9,
+            x1=offset,
+            y1=0.0,
+            x2=offset + 10.0,
+            y2=10.0,
+            track_id=101,
+            crop=crop,
+            pixel_motion_ratio=0.0,
+            has_pixel_motion=False,
+        )
+        counter.update([detection], (100, 100), frame_number)
+
+    assert counter.get_total() == 0
