@@ -1,3 +1,4 @@
+import logging
 import math
 from itertools import combinations
 
@@ -7,6 +8,8 @@ from vehicle_recognition.detection import Detection
 from vehicle_recognition.geometry import Box
 from vehicle_recognition.track_matching import concurrent_tracks_match
 from vehicle_recognition.track_state import TrackState
+
+logger = logging.getLogger(__name__)
 
 
 class VehicleCounter:
@@ -71,9 +74,17 @@ class VehicleCounter:
                 self.vehicles[vehicle_id] = TrackState()
                 self.pending_recovery_vehicle_ids.add(vehicle_id)
 
+                logger.info(
+                    "Создан кандидат: vehicle_id=%d tracker_id=%d frame=%d",
+                    vehicle_id,
+                    tracker_id,
+                    frame_number,
+                )
+
             seen_vehicle_ids.add(vehicle_id)
 
             current_best_detection = best_detections_by_vehicle_id.get(vehicle_id)
+
             if (
                 current_best_detection is None
                 or detection.confidence > current_best_detection.confidence
@@ -102,8 +113,20 @@ class VehicleCounter:
             if (
                 state.frames_seen >= self.min_confirmed_frames
                 and movement_ratio >= self.min_movement_ratio
+                and vehicle_id not in self.counted_vehicle_ids
             ):
                 self.counted_vehicle_ids.add(vehicle_id)
+
+                logger.info(
+                    (
+                        "Машина подтверждена: vehicle_id=%d "
+                        "frames=%d movement_ratio=%.4f frame=%d"
+                    ),
+                    vehicle_id,
+                    state.frames_seen,
+                    movement_ratio,
+                    frame_number,
+                )
 
         # Объединение может удалять ID из исходного множества во время проверки.
         pending_vehicle_ids_copy = self.pending_recovery_vehicle_ids.copy()
@@ -119,7 +142,29 @@ class VehicleCounter:
             )
 
             if recovery_candidate_id is not None:
+                recovery_state = self.vehicles[recovery_candidate_id]
+                recovery_gap = state.first_frame - recovery_state.last_seen_frame
+                recovery_distance = math.dist(
+                    recovery_state.last_center,
+                    state.first_center,
+                )
+                recovery_distance_ratio = recovery_distance / frame_diagonal
+
                 self._merge_vehicle_ids(recovery_candidate_id, new_vehicle_id)
+
+                logger.info(
+                    (
+                        "Восстановлена потерянная машина: vehicle_id=%d "
+                        "removed_vehicle_id=%d gap=%d "
+                        "distance_ratio=%.4f frame=%d"
+                    ),
+                    recovery_candidate_id,
+                    new_vehicle_id,
+                    recovery_gap,
+                    recovery_distance_ratio,
+                    frame_number,
+                )
+
                 seen_vehicle_ids.discard(new_vehicle_id)
                 seen_vehicle_ids.add(recovery_candidate_id)
 
@@ -176,6 +221,17 @@ class VehicleCounter:
             self._merge_vehicle_ids(
                 primary_vehicle_id,
                 secondary_vehicle_id,
+            )
+
+            logger.info(
+                (
+                    "Объединены одновременные треки: vehicle_id=%d "
+                    "removed_vehicle_id=%d evidence_frames=%d frame=%d"
+                ),
+                primary_vehicle_id,
+                secondary_vehicle_id,
+                self.concurrent_merge_frames,
+                frame_number,
             )
 
             seen_vehicle_ids.discard(secondary_vehicle_id)
