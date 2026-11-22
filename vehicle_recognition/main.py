@@ -146,6 +146,22 @@ def main() -> None:
 
     if arguments.save_to_database:
         database_repository = MySQLRepository.from_environment()
+
+        if database_repository.config.retention_days is not None:
+            cleanup_summary = database_repository.clear_results_older_than(
+                database_repository.config.retention_days
+            )
+            logger.info(
+                (
+                    "Database retention applied: days=%d runs=%d "
+                    "observations=%d tracker_ids=%d"
+                ),
+                database_repository.config.retention_days,
+                cleanup_summary.processing_runs,
+                cleanup_summary.vehicle_observations,
+                cleanup_summary.tracker_ids,
+            )
+
         database_run_id = database_repository.create_run(
             source_type=source_type,
             source_name=database_source_name,

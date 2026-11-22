@@ -138,6 +138,31 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 При успешной обработке база получает запись запуска, подтверждённые наблюдения
 машин и все временные ID трекера, которые были объединены в каждую машину.
 
+Срок хранения завершённых результатов задаётся в `.env`, например:
+
+```dotenv
+DATABASE_RETENTION_DAYS=30
+```
+
+При каждом запуске с `--save-to-database` результаты старше 30 дней будут
+удаляться автоматически. Значение `0` отключает автоматическую очистку.
+Активные запуски и записи камер не удаляются.
+
+Чтобы удалить результаты обработки, сохранив записи камер, выполните:
+
+```powershell
+python -m vehicle_recognition.database_admin clear-results
+```
+
+Для защиты от случайного удаления команда потребует ввести `CLEAR`. Она не
+выполнится, пока в базе есть активный запуск со статусом `running`.
+
+Разовая очистка только устаревших результатов выполняется так:
+
+```powershell
+python -m vehicle_recognition.database_admin clear-old-results --days 30
+```
+
 Локальные видеозаписи, веса моделей и результаты обработки не добавляются в
 репозиторий. Их расположение задаётся пользователем при запуске.
 
@@ -242,6 +267,24 @@ Save processing results after the database container becomes healthy:
 
 ```powershell
 python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
+```
+
+Delete processing results while preserving camera records:
+
+```powershell
+python -m vehicle_recognition.database_admin clear-results
+```
+
+Set the automatic retention period in `.env` (`0` disables it):
+
+```dotenv
+DATABASE_RETENTION_DAYS=30
+```
+
+Delete only completed results older than a selected number of days:
+
+```powershell
+python -m vehicle_recognition.database_admin clear-old-results --days 30
 ```
 
 Local videos, model weights, and generated results are excluded from the

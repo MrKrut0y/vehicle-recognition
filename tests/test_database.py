@@ -1,13 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from vehicle_recognition.database import DatabaseConfig, MySQLRepository
 from vehicle_recognition.track_state import TrackState
 
 
 class FakeCursor:
-    def __init__(self) -> None:
+    def __init__(self, fetchone_results=None) -> None:
         self.executed: list[tuple[str, object]] = []
         self.executed_many: list[tuple[str, object]] = []
+        self.fetchone_results = list(fetchone_results or [])
         self.lastrowid: int | None = None
         self.closed = False
 
@@ -22,13 +25,16 @@ class FakeCursor:
     def executemany(self, statement, parameters) -> None:
         self.executed_many.append((statement, parameters))
 
+    def fetchone(self):
+        return self.fetchone_results.pop(0)
+
     def close(self) -> None:
         self.closed = True
 
 
 class FakeConnection:
-    def __init__(self) -> None:
-        self.cursor_instance = FakeCursor()
+    def __init__(self, fetchone_results=None) -> None:
+        self.cursor_instance = FakeCursor(fetchone_results)
         self.committed = False
         self.rolled_back = False
         self.closed = False
@@ -62,6 +68,7 @@ def test_database_config_reads_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("MYSQL_DATABASE", "vehicles")
     monkeypatch.setenv("MYSQL_USER", "app")
     monkeypatch.setenv("MYSQL_PASSWORD", "secret")
+    monkeypatch.setenv("DATABASE_RETENTION_DAYS", "30")
 
     config = DatabaseConfig.from_environment(tmp_path / "missing.env")
 
@@ -71,6 +78,7 @@ def test_database_config_reads_environment(monkeypatch, tmp_path):
         database="vehicles",
         user="app",
         password="secret",
+        retention_days=30,
     )
 
 
@@ -147,3 +155,61 @@ def test_fail_run_records_error_and_commits():
     assert "status = 'failed'" in statement
     assert parameters == (25, "processing failed", 7)
     assert connection.committed is True
+
+
+def test_clear_results_deletes_processing_data_and_preserves_cameras():
+    connection = FakeConnection(fetchone_results=[(0, 3, 12, 15)])
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    summary = repository.clear_results()
+
+    statements = [statement for statement, _ in connection.cursor_instance.executed]
+    assert any("DELETE FROM vehicle_observations" in sql for sql in statements)
+    assert any("DELETE FROM processing_runs" in sql for sql in statements)
+    assert all("DELETE FROM cameras" not in sql for sql in statements)
+    assert summary.processing_runs == 3
+    assert summary.vehicle_observations == 12
+    assert summary.tracker_ids == 15
+    assert connection.committed is True
+    assert connection.rolled_back is False
+
+
+def test_clear_results_refuses_to_delete_active_run():
+    connection = FakeConnection(fetchone_results=[(1, 1, 0, 0)])
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot clear results while a processing run is active",
+    ):
+        repository.clear_results()
+
+    statements = [statement for statement, _ in connection.cursor_instance.executed]
+    assert all("DELETE FROM" not in sql for sql in statements)
+    assert connection.committed is False
+    assert connection.rolled_back is True
+
+
+def test_clear_results_older_than_deletes_only_expired_processing_data():
+    connection = FakeConnection(fetchone_results=[(2, 8, 11)])
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    summary = repository.clear_results_older_than(30)
+
+    statements = [statement for statement, _ in connection.cursor_instance.executed]
+    assert any("DELETE FROM vehicle_observations" in sql for sql in statements)
+    assert any("DELETE FROM processing_runs" in sql for sql in statements)
+    assert all("DELETE FROM cameras" not in sql for sql in statements)
+    assert all("status <> 'running'" in sql for sql in statements)
+    assert summary.processing_runs == 2
+    assert summary.vehicle_observations == 8
+    assert summary.tracker_ids == 11
+    assert connection.committed is True
+    assert connection.rolled_back is False
+
+
+def test_clear_results_older_than_rejects_non_positive_period():
+    repository = MySQLRepository(make_config())
+
+    with pytest.raises(ValueError, match="retention_days must be greater than zero"):
+        repository.clear_results_older_than(0)

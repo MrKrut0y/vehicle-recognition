@@ -19,6 +19,7 @@ class DatabaseConfig:
     database: str
     user: str
     password: str
+    retention_days: int | None = None
 
     @classmethod
     def from_environment(cls, env_path: Path = Path(".env")) -> "DatabaseConfig":
@@ -43,12 +44,25 @@ class DatabaseConfig:
         except ValueError as error:
             raise ValueError("MYSQL_PORT must be an integer") from error
 
+        retention_text = os.getenv("DATABASE_RETENTION_DAYS", "0")
+
+        try:
+            retention_value = int(retention_text)
+        except ValueError as error:
+            raise ValueError("DATABASE_RETENTION_DAYS must be an integer") from error
+
+        if retention_value < 0:
+            raise ValueError("DATABASE_RETENTION_DAYS cannot be negative")
+
+        retention_days = retention_value or None
+
         return cls(
             host=os.getenv("DB_HOST", "127.0.0.1"),
             port=port,
             database=required_values["MYSQL_DATABASE"] or "",
             user=required_values["MYSQL_USER"] or "",
             password=required_values["MYSQL_PASSWORD"] or "",
+            retention_days=retention_days,
         )
 
     def connection_arguments(self) -> dict[str, object]:
@@ -60,6 +74,15 @@ class DatabaseConfig:
             "user": self.user,
             "password": self.password,
         }
+
+
+@dataclass(frozen=True)
+class ClearResultsSummary:
+    """Содержит число удалённых строк каждой таблицы результатов."""
+
+    processing_runs: int
+    vehicle_observations: int
+    tracker_ids: int
 
 
 class MySQLRepository:
@@ -190,6 +213,131 @@ class MySQLRepository:
                 (processed_frames, str(error), run_id),
             )
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
+    def clear_results(self) -> ClearResultsSummary:
+        """Удаляет результаты обработки, сохраняя зарегистрированные камеры."""
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM processing_runs WHERE status = 'running'),
+                    (SELECT COUNT(*) FROM processing_runs),
+                    (SELECT COUNT(*) FROM vehicle_observations),
+                    (SELECT COUNT(*) FROM observation_tracker_ids)
+                """)
+            counts = cursor.fetchone()
+
+            if counts is None:
+                raise RuntimeError("MySQL did not return result row counts")
+
+            active_runs, run_count, observation_count, tracker_id_count = counts
+
+            if active_runs:
+                raise RuntimeError(
+                    "Cannot clear results while a processing run is active"
+                )
+
+            # Удаление наблюдений каскадно удаляет связанные ID трекера.
+            cursor.execute("DELETE FROM vehicle_observations")
+            cursor.execute("DELETE FROM processing_runs")
+            connection.commit()
+
+            return ClearResultsSummary(
+                processing_runs=int(run_count),
+                vehicle_observations=int(observation_count),
+                tracker_ids=int(tracker_id_count),
+            )
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
+    def clear_results_older_than(self, retention_days: int) -> ClearResultsSummary:
+        """Удаляет завершённые результаты старше указанного числа дней."""
+        if retention_days <= 0:
+            raise ValueError("retention_days must be greater than zero")
+
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+        expired_run_condition = """
+            status <> 'running'
+            AND finished_at IS NOT NULL
+            AND finished_at < DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL %s DAY)
+        """
+        joined_expired_run_condition = """
+            run.status <> 'running'
+            AND run.finished_at IS NOT NULL
+            AND run.finished_at
+                < DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL %s DAY)
+        """
+
+        try:
+            cursor.execute(
+                f"""
+                SELECT
+                    (
+                        SELECT COUNT(*)
+                        FROM processing_runs
+                        WHERE {expired_run_condition}
+                    ),
+                    (
+                        SELECT COUNT(*)
+                        FROM vehicle_observations AS observation
+                        JOIN processing_runs AS run
+                            ON run.run_id = observation.run_id
+                        WHERE {joined_expired_run_condition}
+                    ),
+                    (
+                        SELECT COUNT(*)
+                        FROM observation_tracker_ids AS tracker
+                        JOIN vehicle_observations AS observation
+                            ON observation.observation_id = tracker.observation_id
+                        JOIN processing_runs AS run
+                            ON run.run_id = observation.run_id
+                        WHERE {joined_expired_run_condition}
+                    )
+                """,
+                (retention_days, retention_days, retention_days),
+            )
+            counts = cursor.fetchone()
+
+            if counts is None:
+                raise RuntimeError("MySQL did not return expired result row counts")
+
+            run_count, observation_count, tracker_id_count = counts
+
+            cursor.execute(
+                f"""
+                DELETE FROM vehicle_observations
+                WHERE run_id IN (
+                    SELECT run_id
+                    FROM processing_runs
+                    WHERE {expired_run_condition}
+                )
+                """,
+                (retention_days,),
+            )
+            cursor.execute(
+                f"DELETE FROM processing_runs WHERE {expired_run_condition}",
+                (retention_days,),
+            )
+            connection.commit()
+
+            return ClearResultsSummary(
+                processing_runs=int(run_count),
+                vehicle_observations=int(observation_count),
+                tracker_ids=int(tracker_id_count),
+            )
         except Exception:
             connection.rollback()
             raise
