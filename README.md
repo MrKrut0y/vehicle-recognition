@@ -26,6 +26,38 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
+### Обработка на NVIDIA GPU
+
+Для работы на видеокарте необходим актуальный драйвер NVIDIA и версия PyTorch
+с поддержкой CUDA. Отдельно устанавливать CUDA Toolkit не требуется: нужные
+библиотеки CUDA входят в пакет PyTorch.
+
+Для GTX 1080 Ti используйте сборку PyTorch для CUDA 11.8. Выполняйте команды
+в активированном виртуальном окружении:
+
+```powershell
+python -m pip uninstall -y torch torchvision
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+Проверьте, что PyTorch действительно обнаружил видеокарту:
+
+```powershell
+python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+Ожидаемый результат для компьютера с GTX 1080 Ti:
+
+```text
+CUDA available: True
+GPU: NVIDIA GeForce GTX 1080 Ti
+```
+
+Если показано `CUDA available: False`, программа будет работать на процессоре.
+Проверьте драйвер NVIDIA, активированное виртуальное окружение и установленную
+версию PyTorch. При доступной CUDA библиотека Ultralytics автоматически
+использует видеокарту, поэтому отдельный аргумент запуска программы не нужен.
+
 ### Запуск
 
 Команда запуска принимает обязательный путь к исходному видео:
@@ -194,6 +226,38 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
+
+### NVIDIA GPU acceleration
+
+GPU processing requires a current NVIDIA driver and a CUDA-enabled PyTorch
+build. A separate CUDA Toolkit installation is not required because the
+PyTorch package includes the required CUDA runtime libraries.
+
+For a GTX 1080 Ti, install the PyTorch build for CUDA 11.8 inside the activated
+virtual environment:
+
+```powershell
+python -m pip uninstall -y torch torchvision
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+Verify that PyTorch can access the GPU:
+
+```powershell
+python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+Expected output on the GTX 1080 Ti computer:
+
+```text
+CUDA available: True
+GPU: NVIDIA GeForce GTX 1080 Ti
+```
+
+If `CUDA available: False` is printed, processing will use the CPU. Check the
+NVIDIA driver, the active virtual environment, and the installed PyTorch build.
+Ultralytics automatically uses an available CUDA GPU, so the application does
+not require an additional command-line option.
 
 ### Usage
 
