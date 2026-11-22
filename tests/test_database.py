@@ -12,6 +12,7 @@ class FakeCursor:
         self.executed_many: list[tuple[str, object]] = []
         self.fetchone_results = list(fetchone_results or [])
         self.lastrowid: int | None = None
+        self.rowcount = 0
         self.closed = False
 
     def execute(self, statement, parameters=None) -> None:
@@ -93,6 +94,41 @@ def test_create_run_returns_generated_id_and_commits():
     assert connection.rolled_back is False
     assert connection.cursor_instance.closed is True
     assert connection.closed is True
+
+
+def test_recover_interrupted_runs_marks_running_rows_as_failed():
+    connection = FakeConnection()
+    connection.cursor_instance.rowcount = 2
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    recovered_run_count = repository.recover_interrupted_runs()
+
+    statement, parameters = connection.cursor_instance.executed[0]
+    assert "run.status = 'failed'" in statement
+    assert "WHERE run.status = 'running'" in statement
+    assert "observation_summary.observation_count" in statement
+    assert parameters is None
+    assert recovered_run_count == 2
+    assert connection.committed is True
+    assert connection.rolled_back is False
+
+
+def test_update_run_progress_updates_only_active_run():
+    connection = FakeConnection()
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    repository.update_run_progress(
+        run_id=7,
+        processed_frames=200,
+        accepted_observations=4,
+    )
+
+    statement, parameters = connection.cursor_instance.executed[0]
+    assert "UPDATE processing_runs" in statement
+    assert "status = 'running'" in statement
+    assert parameters == (200, 4, 7)
+    assert connection.committed is True
+    assert connection.rolled_back is False
 
 
 def test_save_observations_upserts_observation_and_tracker_ids():

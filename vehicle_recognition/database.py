@@ -143,6 +143,76 @@ class MySQLRepository:
             cursor.close()
             connection.close()
 
+    def recover_interrupted_runs(self) -> int:
+        """Завершает запуски, оставшиеся активными после остановки приложения."""
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute("""
+                UPDATE processing_runs AS run
+                LEFT JOIN (
+                    SELECT
+                        run_id,
+                        COUNT(*) AS observation_count,
+                        MAX(last_frame) AS last_observation_frame
+                    FROM vehicle_observations
+                    GROUP BY run_id
+                ) AS observation_summary
+                    ON observation_summary.run_id = run.run_id
+                SET run.status = 'failed',
+                    run.finished_at = CURRENT_TIMESTAMP(6),
+                    run.processed_frames = GREATEST(
+                        run.processed_frames,
+                        COALESCE(observation_summary.last_observation_frame, 0)
+                    ),
+                    run.accepted_observations = GREATEST(
+                        run.accepted_observations,
+                        COALESCE(observation_summary.observation_count, 0)
+                    ),
+                    run.error_message =
+                        'Application stopped before completing the run'
+                WHERE run.status = 'running'
+                """)
+            recovered_run_count = int(cursor.rowcount)
+            connection.commit()
+            return recovered_run_count
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
+    def update_run_progress(
+        self,
+        run_id: int,
+        processed_frames: int,
+        accepted_observations: int,
+    ) -> None:
+        """Сохраняет промежуточный прогресс активного запуска."""
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute(
+                """
+                UPDATE processing_runs
+                SET processed_frames = %s,
+                    accepted_observations = %s
+                WHERE run_id = %s
+                    AND status = 'running'
+                """,
+                (processed_frames, accepted_observations, run_id),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
     def complete_run(
         self,
         run_id: int,

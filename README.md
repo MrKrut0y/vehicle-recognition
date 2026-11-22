@@ -173,6 +173,11 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 дожидаясь остановки всего процесса. Повторная запись того же `vehicle_id`
 обновляет существующее наблюдение и не создаёт дубликат.
 
+Программа также периодически сохраняет текущий номер кадра и число найденных
+машин. Если прежний процесс аварийно завершился и оставил запуск со статусом
+`running`, следующий запуск приложения переведёт его в `failed`, сохранив уже
+записанные наблюдения и доступный прогресс.
+
 Срок хранения завершённых результатов задаётся в `.env`, например:
 
 ```dotenv
@@ -339,6 +344,11 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 Finalized stream observations are persisted while the run is still active.
 Saving the same `vehicle_id` again updates its existing observation instead of
 creating a duplicate.
+
+The application also stores the current frame and accepted-observation count
+periodically. On startup, it marks runs left in the `running` state by an
+interrupted previous process as `failed` while preserving saved observations
+and available progress.
 
 Delete processing results while preserving camera records:
 

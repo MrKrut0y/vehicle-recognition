@@ -20,6 +20,7 @@ from vehicle_recognition.video_writer import VideoFileWriter
 from vehicle_recognition.visualizer import draw_detections
 
 logger = logging.getLogger(__name__)
+DATABASE_PROGRESS_UPDATE_INTERVAL = 100
 
 
 def positive_int(value: str) -> int:
@@ -149,6 +150,14 @@ def main() -> None:
     if arguments.save_to_database:
         database_repository = MySQLRepository.from_environment()
 
+        recovered_run_count = database_repository.recover_interrupted_runs()
+
+        if recovered_run_count:
+            logger.warning(
+                "Recovered interrupted database runs: count=%d",
+                recovered_run_count,
+            )
+
         if database_repository.config.retention_days is not None:
             cleanup_summary = database_repository.clear_results_older_than(
                 database_repository.config.retention_days
@@ -220,6 +229,17 @@ def main() -> None:
 
             total = counter.get_total()
             stitched_count = counter.get_stitched_id_count()
+
+            if (
+                database_repository is not None
+                and database_run_id is not None
+                and frame_number % DATABASE_PROGRESS_UPDATE_INTERVAL == 0
+            ):
+                database_repository.update_run_progress(
+                    run_id=database_run_id,
+                    processed_frames=frame_number,
+                    accepted_observations=total,
+                )
 
             is_first_frame = frame_number == 1
             is_update_frame = frame_number % 10 == 0
