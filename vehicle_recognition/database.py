@@ -107,6 +107,7 @@ class MySQLRepository:
         source_name: str,
         total_frames: int | None,
         source_fps: float | None,
+        camera_id: int | None = None,
     ) -> int:
         """Создаёт запись о начавшейся обработке и возвращает её ID."""
         if source_type not in {"video", "stream"}:
@@ -119,15 +120,16 @@ class MySQLRepository:
             cursor.execute(
                 """
                 INSERT INTO processing_runs (
+                    camera_id,
                     source_type,
                     source_name,
                     status,
                     total_frames,
                     source_fps
                 )
-                VALUES (%s, %s, 'running', %s, %s)
+                VALUES (%s, %s, %s, 'running', %s, %s)
                 """,
-                (source_type, source_name, total_frames, source_fps),
+                (camera_id, source_type, source_name, total_frames, source_fps),
             )
             run_id = cursor.lastrowid
 
@@ -136,6 +138,45 @@ class MySQLRepository:
 
             connection.commit()
             return int(run_id)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
+    def get_or_create_camera(self, name: str, stream_url: str) -> int:
+        """Создаёт камеру или обновляет URL существующей камеры с тем же именем."""
+        normalized_name = name.strip()
+
+        if not normalized_name:
+            raise ValueError("Camera name cannot be empty")
+
+        if len(normalized_name) > 100:
+            raise ValueError("Camera name cannot be longer than 100 characters")
+
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO cameras (name, stream_url, is_active)
+                VALUES (%s, %s, TRUE)
+                ON DUPLICATE KEY UPDATE
+                    camera_id = LAST_INSERT_ID(camera_id),
+                    stream_url = VALUES(stream_url),
+                    is_active = TRUE
+                """,
+                (normalized_name, stream_url),
+            )
+            camera_id = cursor.lastrowid
+
+            if camera_id is None:
+                raise RuntimeError("MySQL did not return the camera ID")
+
+            connection.commit()
+            return int(camera_id)
         except Exception:
             connection.rollback()
             raise

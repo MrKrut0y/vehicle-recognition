@@ -20,6 +20,8 @@ class FakeCursor:
 
         if "INSERT INTO processing_runs" in statement:
             self.lastrowid = 7
+        elif "INSERT INTO cameras" in statement:
+            self.lastrowid = 3
         elif "INSERT INTO vehicle_observations" in statement:
             self.lastrowid = 42
 
@@ -94,6 +96,53 @@ def test_create_run_returns_generated_id_and_commits():
     assert connection.rolled_back is False
     assert connection.cursor_instance.closed is True
     assert connection.closed is True
+
+
+def test_create_run_stores_camera_id():
+    connection = FakeConnection()
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    repository.create_run(
+        "stream",
+        "https://example.com/live.m3u8",
+        None,
+        15.0,
+        camera_id=3,
+    )
+
+    _, parameters = connection.cursor_instance.executed[0]
+    assert parameters == (
+        3,
+        "stream",
+        "https://example.com/live.m3u8",
+        None,
+        15.0,
+    )
+
+
+def test_get_or_create_camera_returns_id_and_updates_stream_url():
+    connection = FakeConnection()
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    camera_id = repository.get_or_create_camera(
+        "  Aurora N 85 EW  ",
+        "https://example.com/live.m3u8",
+    )
+
+    statement, parameters = connection.cursor_instance.executed[0]
+    assert "INSERT INTO cameras" in statement
+    assert "LAST_INSERT_ID(camera_id)" in statement
+    assert parameters == ("Aurora N 85 EW", "https://example.com/live.m3u8")
+    assert camera_id == 3
+    assert connection.committed is True
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+def test_get_or_create_camera_rejects_invalid_name(name):
+    repository = MySQLRepository(make_config())
+
+    with pytest.raises(ValueError):
+        repository.get_or_create_camera(name, "https://example.com/live.m3u8")
 
 
 def test_recover_interrupted_runs_marks_running_rows_as_failed():

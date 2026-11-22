@@ -81,12 +81,26 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--camera-name",
+        help="Имя сетевой камеры для сохранения её истории в MySQL.",
+    )
+
+    parser.add_argument(
         "--max-frames",
         type=positive_int,
         help="Остановить обработку после указанного числа кадров.",
     )
 
-    return parser.parse_args()
+    arguments = parser.parse_args()
+    source_is_stream = is_stream_url(arguments.source)
+
+    if arguments.camera_name is not None and not source_is_stream:
+        parser.error("--camera-name can only be used with a stream URL")
+
+    if source_is_stream and arguments.save_to_database and not arguments.camera_name:
+        parser.error("--camera-name is required for a database-backed stream")
+
+    return arguments
 
 
 def main() -> None:
@@ -173,11 +187,25 @@ def main() -> None:
                 cleanup_summary.tracker_ids,
             )
 
+        camera_id: int | None = None
+
+        if source_is_stream:
+            camera_id = database_repository.get_or_create_camera(
+                name=arguments.camera_name,
+                stream_url=source_text,
+            )
+            logger.info(
+                "Database camera registered: camera_id=%d name=%s",
+                camera_id,
+                arguments.camera_name,
+            )
+
         database_run_id = database_repository.create_run(
             source_type=source_type,
             source_name=database_source_name,
             total_frames=progress_total_frames,
             source_fps=media_source.fps,
+            camera_id=camera_id,
         )
         logger.info("Database run created: run_id=%d", database_run_id)
 

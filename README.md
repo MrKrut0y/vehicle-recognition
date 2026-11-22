@@ -97,13 +97,14 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 
 | Аргумент | Обязательный | Назначение |
 |---|---:|---|
-| `source` | Да | Путь к исходному видеофайлу |
+| `source` | Да | Путь к видеофайлу или URL сетевой трансляции |
 | `--output` | Нет | Путь для сохранения обработанного видео |
 | `--show` | Нет | Показывать обработанные кадры во время работы |
 | `--verbose` | Нет | Выводить подробный журнал событий вместо однострочного прогресса |
 | `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
 | `--log-file` | Нет | Файл подробного журнала; по умолчанию `results/vehicle_recognition.log` |
 | `--save-to-database` | Нет | Сохранить запуск и подтверждённые наблюдения в MySQL |
+| `--camera-name` | Для потока с БД | Имя сетевой камеры; связывает её последовательные запуски в MySQL |
 | `--max-frames` | Нет | Остановить обработку после указанного числа кадров |
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
@@ -165,6 +166,16 @@ ID трекера. Первоначальная схема находится в
 ```powershell
 python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 ```
+
+Для сетевой камеры дополнительно задайте постоянное понятное имя:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --save-to-database --camera-name "City camera 1"
+```
+
+При первом запуске камера будет создана в таблице `cameras`. Последующие
+запуски с тем же именем получат прежний `camera_id`, даже если URL потока
+изменился.
 
 Файл `.env` используется одновременно Docker Compose и Python-приложением.
 При успешной обработке база получает запись запуска, подтверждённые наблюдения
@@ -302,13 +313,14 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 
 | Argument | Required | Description |
 |---|---:|---|
-| `source` | Yes | Path to the input video |
+| `source` | Yes | Path to an input video or a network-stream URL |
 | `--output` | No | Path for the annotated output video |
 | `--show` | No | Display processed frames while running |
 | `--verbose` | No | Print detailed tracking events instead of the one-line progress display |
 | `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
 | `--log-file` | No | Detailed processing log; defaults to `results/vehicle_recognition.log` |
 | `--save-to-database` | No | Save the run and confirmed observations to MySQL |
+| `--camera-name` | For a database-backed stream | Stable camera name used to associate its MySQL run history |
 | `--max-frames` | No | Stop processing after the specified number of frames |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
@@ -340,6 +352,15 @@ Save processing results after the database container becomes healthy:
 ```powershell
 python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 ```
+
+Provide a stable camera name when saving a network stream:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --save-to-database --camera-name "City camera 1"
+```
+
+The first run creates the camera record. Later runs with the same name reuse
+its `camera_id` and update its stream URL if necessary.
 
 Finalized stream observations are persisted while the run is still active.
 Saving the same `vehicle_id` again updates its existing observation instead of
