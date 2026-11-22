@@ -7,10 +7,11 @@ from vehicle_recognition.track_state import TrackState
 
 
 class FakeCursor:
-    def __init__(self, fetchone_results=None) -> None:
+    def __init__(self, fetchone_results=None, fetchall_results=None) -> None:
         self.executed: list[tuple[str, object]] = []
         self.executed_many: list[tuple[str, object]] = []
         self.fetchone_results = list(fetchone_results or [])
+        self.fetchall_results = list(fetchall_results or [])
         self.lastrowid: int | None = None
         self.rowcount = 0
         self.closed = False
@@ -31,13 +32,18 @@ class FakeCursor:
     def fetchone(self):
         return self.fetchone_results.pop(0)
 
+    def fetchall(self):
+        if not self.fetchall_results:
+            return []
+        return self.fetchall_results.pop(0)
+
     def close(self) -> None:
         self.closed = True
 
 
 class FakeConnection:
-    def __init__(self, fetchone_results=None) -> None:
-        self.cursor_instance = FakeCursor(fetchone_results)
+    def __init__(self, fetchone_results=None, fetchall_results=None) -> None:
+        self.cursor_instance = FakeCursor(fetchone_results, fetchall_results)
         self.committed = False
         self.rolled_back = False
         self.closed = False
@@ -260,7 +266,10 @@ def test_fail_run_records_error_and_commits():
 
 
 def test_clear_results_deletes_processing_data_and_preserves_cameras():
-    connection = FakeConnection(fetchone_results=[(0, 3, 12, 15)])
+    connection = FakeConnection(
+        fetchone_results=[(0, 3, 12, 15)],
+        fetchall_results=[[("results/vehicle_images/run_1/vehicle.jpg",)]],
+    )
     repository = MySQLRepository(make_config(), lambda **arguments: connection)
 
     summary = repository.clear_results()
@@ -272,6 +281,7 @@ def test_clear_results_deletes_processing_data_and_preserves_cameras():
     assert summary.processing_runs == 3
     assert summary.vehicle_observations == 12
     assert summary.tracker_ids == 15
+    assert summary.image_paths == (Path("results/vehicle_images/run_1/vehicle.jpg"),)
     assert connection.committed is True
     assert connection.rolled_back is False
 
@@ -293,7 +303,10 @@ def test_clear_results_refuses_to_delete_active_run():
 
 
 def test_clear_results_older_than_deletes_only_expired_processing_data():
-    connection = FakeConnection(fetchone_results=[(2, 8, 11)])
+    connection = FakeConnection(
+        fetchone_results=[(2, 8, 11)],
+        fetchall_results=[[("results/vehicle_images/run_1/vehicle.jpg",)]],
+    )
     repository = MySQLRepository(make_config(), lambda **arguments: connection)
 
     summary = repository.clear_results_older_than(30)
@@ -306,6 +319,7 @@ def test_clear_results_older_than_deletes_only_expired_processing_data():
     assert summary.processing_runs == 2
     assert summary.vehicle_observations == 8
     assert summary.tracker_ids == 11
+    assert summary.image_paths == (Path("results/vehicle_images/run_1/vehicle.jpg"),)
     assert connection.committed is True
     assert connection.rolled_back is False
 

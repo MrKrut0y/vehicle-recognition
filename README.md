@@ -99,6 +99,8 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 |---|---:|---|
 | `source` | Да | Путь к видеофайлу или URL сетевой трансляции |
 | `--output` | Нет | Путь для сохранения обработанного видео |
+| `--output-segment-minutes` | Нет | Длительность сегмента потокового видео; по умолчанию 60 минут |
+| `--output-max-segments` | Нет | Число хранимых сегментов потока; по умолчанию 24 |
 | `--show` | Нет | Показывать обработанные кадры во время работы |
 | `--verbose` | Нет | Выводить подробный журнал событий вместо однострочного прогресса |
 | `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
@@ -109,8 +111,13 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
 Работа без показа кадров обычно выполняется быстрее.
-При кратком сетевом обрыве поток автоматически переподключается. Использование
-`--output` без ограничения времени создаёт постоянно растущий видеофайл.
+При сетевом обрыве программа продолжает попытки переподключения без ограничения,
+увеличивая паузу между ними до 60 секунд. При использовании `--output` поток
+записывается часовыми сегментами; по умолчанию сохраняются последние 24 файла.
+
+При временной недоступности MySQL операции сохранения также повторяются с
+увеличением паузы до 60 секунд. После восстановления базы обработка продолжается
+без повторного создания уже записанных наблюдений.
 
 ### Режимы вывода
 
@@ -129,8 +136,9 @@ Progress: 42.6% | frames 1278/3000 | 6.0 FPS | remaining 04:47 | vehicles 18 | s
 python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test3_result.mp4" --verbose
 ```
 
-Подробный журнал всегда записывается в файл, даже без `--verbose`. При новом
-запуске указанный файл перезаписывается, чтобы события разных тестов не смешивались.
+Подробный журнал всегда записывается в файл, даже без `--verbose`. При достижении
+10 МБ журнал переносится в резервный файл; сохраняются пять предыдущих частей,
+поэтому длительная работа не приводит к неограниченному росту логов.
 
 ### Тесты
 
@@ -207,6 +215,8 @@ python -m vehicle_recognition.database_admin clear-results
 
 Для защиты от случайного удаления команда потребует ввести `CLEAR`. Она не
 выполнится, пока в базе есть активный запуск со статусом `running`.
+Вместе со строками наблюдений удаляются связанные снимки внутри
+`results/vehicle_images`. Для другого каталога передайте `--images-dir`.
 
 Разовая очистка только устаревших результатов выполняется так:
 
@@ -311,10 +321,15 @@ Enable detailed event logs:
 python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test3_result.mp4" --verbose
 ```
 
+The detailed log rotates at 10 MB and keeps five backup files, preventing
+unlimited disk usage during continuous processing.
+
 | Argument | Required | Description |
 |---|---:|---|
 | `source` | Yes | Path to an input video or a network-stream URL |
 | `--output` | No | Path for the annotated output video |
+| `--output-segment-minutes` | No | Stream video segment duration; defaults to 60 minutes |
+| `--output-max-segments` | No | Number of retained stream segments; defaults to 24 |
 | `--show` | No | Display processed frames while running |
 | `--verbose` | No | Print detailed tracking events instead of the one-line progress display |
 | `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
@@ -324,9 +339,12 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--max-frames` | No | Stop processing after the specified number of frames |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
-preview is usually faster. The application attempts to reconnect after a short
-stream interruption. Using `--output` without a frame limit creates a video file
-that continues to grow until processing stops.
+preview is usually faster. The application keeps reconnecting after a stream
+interruption, increasing the delay up to 60 seconds. With `--output`, streams
+are stored in hourly segments and the latest 24 files are retained by default.
+
+MySQL operations are also retried with a delay of up to 60 seconds during a
+temporary outage. Processing resumes after the database becomes available.
 
 ### Tests
 
@@ -376,6 +394,9 @@ Delete processing results while preserving camera records:
 ```powershell
 python -m vehicle_recognition.database_admin clear-results
 ```
+
+Associated images inside `results/vehicle_images` are deleted as well. Pass
+`--images-dir` when the images were stored in another directory.
 
 Set the automatic retention period in `.env` (`0` disables it):
 

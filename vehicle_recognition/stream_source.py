@@ -22,12 +22,14 @@ class StreamSource:
     def __init__(
         self,
         source: str,
-        reconnect_attempts: int = 5,
+        reconnect_attempts: int | None = None,
         reconnect_delay_seconds: float = 2.0,
+        max_reconnect_delay_seconds: float = 60.0,
     ) -> None:
         self.source = source
         self.reconnect_attempts = reconnect_attempts
         self.reconnect_delay_seconds = reconnect_delay_seconds
+        self.max_reconnect_delay_seconds = max_reconnect_delay_seconds
         self.fps: float | None = None
         self.total_frames: None = None
 
@@ -47,26 +49,34 @@ class StreamSource:
 
     def read_metadata(self) -> bool:
         """Проверяет доступность потока и получает заявленную частоту кадров."""
-        capture = self._open_capture(self.source)
+        failed_attempts = 0
 
-        if not capture.isOpened():
-            logger.error("Could not open stream: %s", self.source)
+        while True:
+            capture = self._open_capture(self.source)
+
+            if capture.isOpened():
+                try:
+                    reported_fps = capture.get(cv2.CAP_PROP_FPS)
+                    self.fps = reported_fps if reported_fps > 0 else None
+                finally:
+                    capture.release()
+
+                return True
+
             capture.release()
-            return False
+            failed_attempts += 1
 
-        try:
-            reported_fps = capture.get(cv2.CAP_PROP_FPS)
-            self.fps = reported_fps if reported_fps > 0 else None
-        finally:
-            capture.release()
+            if not self._can_retry(failed_attempts):
+                logger.error("Could not open stream: %s", self.source)
+                return False
 
-        return True
+            self._wait_before_reconnect(failed_attempts)
 
     def generate_frames(self) -> Iterator[np.ndarray]:
         """Выдаёт кадры и несколько раз переподключается после ошибки чтения."""
         failed_attempts = 0
 
-        while failed_attempts <= self.reconnect_attempts:
+        while True:
             capture = self._open_capture(self.source)
 
             if not capture.isOpened():
@@ -91,16 +101,31 @@ class StreamSource:
 
                 failed_attempts += 1
 
-            if failed_attempts > self.reconnect_attempts:
-                break
+            if not self._can_retry(failed_attempts):
+                raise RuntimeError(
+                    "Stream unavailable after "
+                    f"{self.reconnect_attempts} reconnect attempts"
+                )
 
-            logger.warning(
-                "Stream connection lost; reconnecting: attempt=%d/%d",
-                failed_attempts,
-                self.reconnect_attempts,
-            )
-            time.sleep(self.reconnect_delay_seconds)
+            self._wait_before_reconnect(failed_attempts)
 
-        raise RuntimeError(
-            f"Stream unavailable after {self.reconnect_attempts} reconnect attempts"
+    def _can_retry(self, failed_attempts: int) -> bool:
+        """Проверяет, разрешена ли следующая попытка подключения."""
+        return (
+            self.reconnect_attempts is None
+            or failed_attempts <= self.reconnect_attempts
         )
+
+    def _wait_before_reconnect(self, failed_attempts: int) -> None:
+        """Ожидает перед подключением, постепенно увеличивая паузу."""
+        exponent = min(max(failed_attempts - 1, 0), 10)
+        delay_seconds = min(
+            self.reconnect_delay_seconds * (2**exponent),
+            self.max_reconnect_delay_seconds,
+        )
+        logger.warning(
+            "Stream connection lost; reconnecting: attempt=%d delay=%.1fs",
+            failed_attempts,
+            delay_seconds,
+        )
+        time.sleep(delay_seconds)

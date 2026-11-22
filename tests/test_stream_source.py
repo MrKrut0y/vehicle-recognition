@@ -78,3 +78,57 @@ def test_stream_source_reconnects_after_read_failure(monkeypatch):
     frames.close()
     failed_capture.release.assert_called_once_with()
     recovered_capture.release.assert_called_once_with()
+
+
+def test_stream_source_uses_exponential_reconnect_delay(monkeypatch):
+    recovered_frame = object()
+    failed_captures = [Mock(), Mock()]
+    for capture in failed_captures:
+        capture.isOpened.return_value = False
+
+    recovered_capture = Mock()
+    recovered_capture.isOpened.return_value = True
+    recovered_capture.get.return_value = 15.0
+    recovered_capture.read.return_value = (True, recovered_frame)
+    captures = iter((*failed_captures, recovered_capture))
+    delays: list[float] = []
+    monkeypatch.setattr(
+        "vehicle_recognition.stream_source.cv2.VideoCapture",
+        lambda *arguments: next(captures),
+    )
+    monkeypatch.setattr(
+        "vehicle_recognition.stream_source.time.sleep",
+        delays.append,
+    )
+    source = StreamSource(
+        "https://example.com/live.m3u8",
+        reconnect_delay_seconds=2.0,
+    )
+    frames = source.generate_frames()
+
+    assert next(frames) is recovered_frame
+    assert delays == [2.0, 4.0]
+
+    frames.close()
+
+
+def test_stream_source_retries_initial_connection(monkeypatch):
+    failed_capture = Mock()
+    failed_capture.isOpened.return_value = False
+    recovered_capture = Mock()
+    recovered_capture.isOpened.return_value = True
+    recovered_capture.get.return_value = 15.0
+    captures = iter((failed_capture, recovered_capture))
+    delays: list[float] = []
+    monkeypatch.setattr(
+        "vehicle_recognition.stream_source.cv2.VideoCapture",
+        lambda *arguments: next(captures),
+    )
+    monkeypatch.setattr(
+        "vehicle_recognition.stream_source.time.sleep",
+        delays.append,
+    )
+    source = StreamSource("https://example.com/live.m3u8")
+
+    assert source.read_metadata() is True
+    assert delays == [2.0]

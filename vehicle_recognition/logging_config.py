@@ -1,5 +1,9 @@
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
 
 
 def configure_logging(verbose: bool, log_file: Path) -> None:
@@ -16,7 +20,13 @@ def configure_logging(verbose: bool, log_file: Path) -> None:
     console_handler.setFormatter(formatter)
 
     # Файл всегда содержит подробные события, даже без --verbose.
-    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        log_file,
+        mode="a",
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 

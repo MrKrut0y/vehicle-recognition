@@ -83,6 +83,7 @@ class ClearResultsSummary:
     processing_runs: int
     vehicle_observations: int
     tracker_ids: int
+    image_paths: tuple[Path, ...] = ()
 
 
 class MySQLRepository:
@@ -356,6 +357,13 @@ class MySQLRepository:
 
         try:
             cursor.execute("""
+                SELECT image_path
+                FROM vehicle_observations
+                WHERE image_path IS NOT NULL
+                """)
+            image_paths = tuple(Path(row[0]) for row in cursor.fetchall())
+
+            cursor.execute("""
                 SELECT
                     (SELECT COUNT(*) FROM processing_runs WHERE status = 'running'),
                     (SELECT COUNT(*) FROM processing_runs),
@@ -383,6 +391,7 @@ class MySQLRepository:
                 processing_runs=int(run_count),
                 vehicle_observations=int(observation_count),
                 tracker_ids=int(tracker_id_count),
+                image_paths=image_paths,
             )
         except Exception:
             connection.rollback()
@@ -411,6 +420,19 @@ class MySQLRepository:
         """
 
         try:
+            cursor.execute(
+                f"""
+                SELECT observation.image_path
+                FROM vehicle_observations AS observation
+                JOIN processing_runs AS run
+                    ON run.run_id = observation.run_id
+                WHERE {joined_expired_run_condition}
+                    AND observation.image_path IS NOT NULL
+                """,
+                (retention_days,),
+            )
+            image_paths = tuple(Path(row[0]) for row in cursor.fetchall())
+
             cursor.execute(
                 f"""
                 SELECT
@@ -466,6 +488,7 @@ class MySQLRepository:
                 processing_runs=int(run_count),
                 vehicle_observations=int(observation_count),
                 tracker_ids=int(tracker_id_count),
+                image_paths=image_paths,
             )
         except Exception:
             connection.rollback()

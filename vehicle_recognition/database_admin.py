@@ -1,6 +1,8 @@
 import argparse
+from pathlib import Path
 
 from vehicle_recognition.database import MySQLRepository
+from vehicle_recognition.image_cleanup import delete_result_images
 
 
 def positive_int(value: str) -> int:
@@ -29,6 +31,12 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Не запрашивать интерактивное подтверждение.",
     )
+    clear_parser.add_argument(
+        "--images-dir",
+        type=Path,
+        default=Path("results/vehicle_images"),
+        help="Каталог сохранённых снимков машин.",
+    )
 
     old_results_parser = subparsers.add_parser(
         "clear-old-results",
@@ -39,6 +47,12 @@ def parse_arguments() -> argparse.Namespace:
         type=positive_int,
         required=True,
         help="Срок хранения завершённых результатов в днях.",
+    )
+    old_results_parser.add_argument(
+        "--images-dir",
+        type=Path,
+        default=Path("results/vehicle_images"),
+        help="Каталог сохранённых снимков машин.",
     )
     old_results_parser.add_argument(
         "--yes",
@@ -67,11 +81,12 @@ def main() -> None:
             return
 
         summary = MySQLRepository.from_environment().clear_results()
+        deleted_images = delete_result_images(summary.image_paths, arguments.images_dir)
         print(
             "Database results cleared: "
             f"runs={summary.processing_runs}, "
             f"observations={summary.vehicle_observations}, "
-            f"tracker_ids={summary.tracker_ids}."
+            f"tracker_ids={summary.tracker_ids}, images={deleted_images}."
         )
         print("Camera records were preserved.")
 
@@ -85,11 +100,12 @@ def main() -> None:
         summary = MySQLRepository.from_environment().clear_results_older_than(
             arguments.days
         )
+        deleted_images = delete_result_images(summary.image_paths, arguments.images_dir)
         print(
             "Expired database results cleared: "
             f"runs={summary.processing_runs}, "
             f"observations={summary.vehicle_observations}, "
-            f"tracker_ids={summary.tracker_ids}."
+            f"tracker_ids={summary.tracker_ids}, images={deleted_images}."
         )
         print("Recent results, active runs, and camera records were preserved.")
 

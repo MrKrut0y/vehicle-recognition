@@ -7,9 +7,11 @@ import cv2
 
 from vehicle_recognition.counter import VehicleCounter
 from vehicle_recognition.database import MySQLRepository
+from vehicle_recognition.database_retry import retry_database_operation
 from vehicle_recognition.detector import VehicleDetector
 from vehicle_recognition.file_source import FileSource
 from vehicle_recognition.frame_pacer import FramePacer
+from vehicle_recognition.image_cleanup import delete_result_images
 from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
 from vehicle_recognition.motion import PixelMotionAnalyzer
@@ -17,7 +19,7 @@ from vehicle_recognition.periodic_trigger import PeriodicTrigger
 from vehicle_recognition.progress import build_progress_message, print_progress
 from vehicle_recognition.result_persistence import persist_new_observations
 from vehicle_recognition.stream_source import StreamSource, is_stream_url
-from vehicle_recognition.video_writer import VideoFileWriter
+from vehicle_recognition.video_writer import SegmentedVideoFileWriter, VideoFileWriter
 from vehicle_recognition.visualizer import draw_detections
 
 logger = logging.getLogger(__name__)
@@ -35,23 +37,34 @@ def positive_int(value: str) -> int:
     return parsed_value
 
 
-def apply_database_retention(repository: MySQLRepository) -> None:
+def apply_database_retention(
+    repository: MySQLRepository,
+    image_root: Path,
+) -> None:
     """Удаляет устаревшие результаты, если для базы настроен срок хранения."""
     retention_days = repository.config.retention_days
 
     if retention_days is None:
         return
 
-    cleanup_summary = repository.clear_results_older_than(retention_days)
+    cleanup_summary = retry_database_operation(
+        "apply retention",
+        lambda: repository.clear_results_older_than(retention_days),
+    )
+    deleted_image_count = delete_result_images(
+        cleanup_summary.image_paths,
+        image_root,
+    )
     logger.info(
         (
             "Database retention applied: days=%d runs=%d "
-            "observations=%d tracker_ids=%d"
+            "observations=%d tracker_ids=%d images=%d"
         ),
         retention_days,
         cleanup_summary.processing_runs,
         cleanup_summary.vehicle_observations,
         cleanup_summary.tracker_ids,
+        deleted_image_count,
     )
 
 
@@ -68,6 +81,20 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument(
         "--output", type=Path, help="Путь для сохранения обработанного видео."
+    )
+
+    parser.add_argument(
+        "--output-segment-minutes",
+        type=positive_int,
+        default=60,
+        help="Длительность одного файла потокового видео в минутах.",
+    )
+
+    parser.add_argument(
+        "--output-max-segments",
+        type=positive_int,
+        default=24,
+        help="Максимальное число хранимых сегментов потокового видео.",
     )
 
     parser.add_argument(
@@ -187,7 +214,10 @@ def main() -> None:
     if arguments.save_to_database:
         database_repository = MySQLRepository.from_environment()
 
-        recovered_run_count = database_repository.recover_interrupted_runs()
+        recovered_run_count = retry_database_operation(
+            "recover interrupted runs",
+            database_repository.recover_interrupted_runs,
+        )
 
         if recovered_run_count:
             logger.warning(
@@ -195,7 +225,7 @@ def main() -> None:
                 recovered_run_count,
             )
 
-        apply_database_retention(database_repository)
+        apply_database_retention(database_repository, arguments.images_dir)
 
         if database_repository.config.retention_days is not None:
             retention_trigger = PeriodicTrigger(DATABASE_RETENTION_INTERVAL_SECONDS)
@@ -203,9 +233,12 @@ def main() -> None:
         camera_id: int | None = None
 
         if source_is_stream:
-            camera_id = database_repository.get_or_create_camera(
-                name=arguments.camera_name,
-                stream_url=source_text,
+            camera_id = retry_database_operation(
+                "register camera",
+                lambda: database_repository.get_or_create_camera(
+                    name=arguments.camera_name,
+                    stream_url=source_text,
+                ),
             )
             logger.info(
                 "Database camera registered: camera_id=%d name=%s",
@@ -213,16 +246,19 @@ def main() -> None:
                 arguments.camera_name,
             )
 
-        database_run_id = database_repository.create_run(
-            source_type=source_type,
-            source_name=database_source_name,
-            total_frames=progress_total_frames,
-            source_fps=media_source.fps,
-            camera_id=camera_id,
+        database_run_id = retry_database_operation(
+            "create processing run",
+            lambda: database_repository.create_run(
+                source_type=source_type,
+                source_name=database_source_name,
+                total_frames=progress_total_frames,
+                source_fps=media_source.fps,
+                camera_id=camera_id,
+            ),
         )
         logger.info("Database run created: run_id=%d", database_run_id)
 
-    video_writer: VideoFileWriter | None = None
+    video_writer: VideoFileWriter | SegmentedVideoFileWriter | None = None
     frame_pacer = FramePacer(media_source.fps or 30.0)
     persisted_vehicle_ids: set[int] = set()
     saved_image_paths: dict[int, Path] = {}
@@ -256,15 +292,18 @@ def main() -> None:
             counter.update(detections, frame_size, frame_number)
 
             if database_repository is not None and database_run_id is not None:
-                new_image_paths = persist_new_observations(
-                    repository=database_repository,
-                    run_id=database_run_id,
-                    counted_vehicle_ids=counter.counted_vehicle_ids,
-                    vehicles=counter.vehicles,
-                    persisted_vehicle_ids=persisted_vehicle_ids,
-                    image_output_directory=image_output_directory,
-                    source_fps=media_source.fps or 30.0,
-                    frame_diagonal=counter.frame_diagonal,
+                new_image_paths = retry_database_operation(
+                    "persist observations",
+                    lambda: persist_new_observations(
+                        repository=database_repository,
+                        run_id=database_run_id,
+                        counted_vehicle_ids=counter.counted_vehicle_ids,
+                        vehicles=counter.vehicles,
+                        persisted_vehicle_ids=persisted_vehicle_ids,
+                        image_output_directory=image_output_directory,
+                        source_fps=media_source.fps or 30.0,
+                        frame_diagonal=counter.frame_diagonal,
+                    ),
                 )
                 saved_image_paths.update(new_image_paths)
 
@@ -276,10 +315,13 @@ def main() -> None:
                 and database_run_id is not None
                 and frame_number % DATABASE_PROGRESS_UPDATE_INTERVAL == 0
             ):
-                database_repository.update_run_progress(
-                    run_id=database_run_id,
-                    processed_frames=frame_number,
-                    accepted_observations=total,
+                retry_database_operation(
+                    "update run progress",
+                    lambda: database_repository.update_run_progress(
+                        run_id=database_run_id,
+                        processed_frames=frame_number,
+                        accepted_observations=total,
+                    ),
                 )
 
             if (
@@ -287,7 +329,7 @@ def main() -> None:
                 and retention_trigger is not None
                 and retention_trigger.is_due()
             ):
-                apply_database_retention(database_repository)
+                apply_database_retention(database_repository, arguments.images_dir)
 
             is_first_frame = frame_number == 1
             is_update_frame = frame_number % 10 == 0
@@ -326,11 +368,22 @@ def main() -> None:
                         # Некоторые источники не сообщают FPS, поэтому используем запасное значение.
                         fps = 30.0
 
-                    video_writer = VideoFileWriter(
-                        output_path=arguments.output,
-                        fps=fps,
-                        frame_size=(width, height),
-                    )
+                    if source_is_stream:
+                        video_writer = SegmentedVideoFileWriter(
+                            output_path=arguments.output,
+                            fps=fps,
+                            frame_size=(width, height),
+                            segment_duration_seconds=(
+                                arguments.output_segment_minutes * 60
+                            ),
+                            max_segments=arguments.output_max_segments,
+                        )
+                    else:
+                        video_writer = VideoFileWriter(
+                            output_path=arguments.output,
+                            fps=fps,
+                            frame_size=(width, height),
+                        )
 
                 video_writer.write(annotated_frame)
 
@@ -351,10 +404,13 @@ def main() -> None:
     except Exception as error:
         if database_repository is not None and database_run_id is not None:
             try:
-                database_repository.fail_run(
-                    database_run_id,
-                    processed_frames,
-                    error,
+                retry_database_operation(
+                    "mark run as failed",
+                    lambda: database_repository.fail_run(
+                        database_run_id,
+                        processed_frames,
+                        error,
+                    ),
                 )
             except Exception:
                 logger.exception(
@@ -382,23 +438,29 @@ def main() -> None:
         counter.finalize_all(completion_reason)
 
         if database_repository is not None and database_run_id is not None:
-            new_image_paths = persist_new_observations(
-                repository=database_repository,
-                run_id=database_run_id,
-                counted_vehicle_ids=counter.counted_vehicle_ids,
-                vehicles=counter.vehicles,
-                persisted_vehicle_ids=persisted_vehicle_ids,
-                image_output_directory=image_output_directory,
-                source_fps=media_source.fps or 30.0,
-                frame_diagonal=counter.frame_diagonal,
+            new_image_paths = retry_database_operation(
+                "persist final observations",
+                lambda: persist_new_observations(
+                    repository=database_repository,
+                    run_id=database_run_id,
+                    counted_vehicle_ids=counter.counted_vehicle_ids,
+                    vehicles=counter.vehicles,
+                    persisted_vehicle_ids=persisted_vehicle_ids,
+                    image_output_directory=image_output_directory,
+                    source_fps=media_source.fps or 30.0,
+                    frame_diagonal=counter.frame_diagonal,
+                ),
             )
             saved_image_paths.update(new_image_paths)
 
-            database_repository.complete_run(
-                run_id=database_run_id,
-                processed_frames=processed_frames,
-                accepted_observations=len(counter.counted_vehicle_ids),
-                status="cancelled" if run_cancelled else "completed",
+            retry_database_operation(
+                "complete processing run",
+                lambda: database_repository.complete_run(
+                    run_id=database_run_id,
+                    processed_frames=processed_frames,
+                    accepted_observations=len(counter.counted_vehicle_ids),
+                    status="cancelled" if run_cancelled else "completed",
+                ),
             )
             logger.info("Database run completed: run_id=%d", database_run_id)
         else:
