@@ -13,6 +13,7 @@ from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
 from vehicle_recognition.motion import PixelMotionAnalyzer
 from vehicle_recognition.progress import build_progress_message, print_progress
+from vehicle_recognition.result_persistence import persist_new_observations
 from vehicle_recognition.stream_source import StreamSource, is_stream_url
 from vehicle_recognition.video_writer import VideoFileWriter
 from vehicle_recognition.visualizer import draw_detections
@@ -171,6 +172,12 @@ def main() -> None:
         logger.info("Database run created: run_id=%d", database_run_id)
 
     video_writer: VideoFileWriter | None = None
+    persisted_vehicle_ids: set[int] = set()
+    saved_image_paths: dict[int, Path] = {}
+    image_output_directory = arguments.images_dir
+
+    if database_run_id is not None:
+        image_output_directory /= f"run_{database_run_id:06d}"
 
     processed_frames = 0
     started_at = time.perf_counter()
@@ -195,6 +202,20 @@ def main() -> None:
             frame_size = (width, height)
 
             counter.update(detections, frame_size, frame_number)
+
+            if database_repository is not None and database_run_id is not None:
+                new_image_paths = persist_new_observations(
+                    repository=database_repository,
+                    run_id=database_run_id,
+                    counted_vehicle_ids=counter.counted_vehicle_ids,
+                    vehicles=counter.vehicles,
+                    persisted_vehicle_ids=persisted_vehicle_ids,
+                    image_output_directory=image_output_directory,
+                    source_fps=media_source.fps or 30.0,
+                    frame_diagonal=counter.frame_diagonal,
+                )
+                saved_image_paths.update(new_image_paths)
+
             total = counter.get_total()
             stitched_count = counter.get_stitched_id_count()
 
@@ -290,28 +311,32 @@ def main() -> None:
         completion_reason = "stream_stopped" if source_is_stream else "video_ended"
         counter.finalize_all(completion_reason)
 
-        image_output_directory = arguments.images_dir
-        if database_run_id is not None:
-            image_output_directory /= f"run_{database_run_id:06d}"
-
-        saved_image_paths = save_vehicle_images(
-            image_output_directory,
-            counter.counted_vehicle_ids,
-            counter.vehicles,
-        )
-
         if database_repository is not None and database_run_id is not None:
+            new_image_paths = persist_new_observations(
+                repository=database_repository,
+                run_id=database_run_id,
+                counted_vehicle_ids=counter.counted_vehicle_ids,
+                vehicles=counter.vehicles,
+                persisted_vehicle_ids=persisted_vehicle_ids,
+                image_output_directory=image_output_directory,
+                source_fps=media_source.fps or 30.0,
+                frame_diagonal=counter.frame_diagonal,
+            )
+            saved_image_paths.update(new_image_paths)
+
             database_repository.complete_run(
                 run_id=database_run_id,
                 processed_frames=processed_frames,
-                source_fps=media_source.fps or 30.0,
-                vehicle_ids=counter.counted_vehicle_ids,
-                vehicles=counter.vehicles,
-                frame_diagonal=counter.frame_diagonal,
-                image_paths=saved_image_paths,
+                accepted_observations=len(counter.counted_vehicle_ids),
                 status="cancelled" if run_cancelled else "completed",
             )
             logger.info("Database run completed: run_id=%d", database_run_id)
+        else:
+            saved_image_paths = save_vehicle_images(
+                image_output_directory,
+                counter.counted_vehicle_ids,
+                counter.vehicles,
+            )
     except Exception as error:
         if database_repository is not None and database_run_id is not None:
             try:

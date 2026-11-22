@@ -95,7 +95,7 @@ def test_create_run_returns_generated_id_and_commits():
     assert connection.closed is True
 
 
-def test_complete_run_saves_observation_and_tracker_ids():
+def test_save_observations_upserts_observation_and_tracker_ids():
     connection = FakeConnection()
     repository = MySQLRepository(make_config(), lambda **arguments: connection)
     state = TrackState()
@@ -124,9 +124,8 @@ def test_complete_run_saves_observation_and_tracker_ids():
     state.finalized = True
     state.completion_reason = "video_ended"
 
-    repository.complete_run(
+    repository.save_observations(
         run_id=7,
-        processed_frames=100,
         source_fps=10.0,
         vehicle_ids={1},
         vehicles={1: state},
@@ -136,13 +135,31 @@ def test_complete_run_saves_observation_and_tracker_ids():
 
     statements = [statement for statement, _ in connection.cursor_instance.executed]
     assert any("INSERT INTO vehicle_observations" in sql for sql in statements)
-    assert any("UPDATE processing_runs" in sql for sql in statements)
+    assert any("ON DUPLICATE KEY UPDATE" in sql for sql in statements)
+    assert any("DELETE FROM observation_tracker_ids" in sql for sql in statements)
     assert connection.cursor_instance.executed_many[0][1] == [
         (42, 101, 1),
         (42, 202, 1),
     ]
     assert connection.committed is True
     assert connection.rolled_back is False
+
+
+def test_complete_run_updates_status_without_reinserting_observations():
+    connection = FakeConnection()
+    repository = MySQLRepository(make_config(), lambda **arguments: connection)
+
+    repository.complete_run(
+        run_id=7,
+        processed_frames=100,
+        accepted_observations=3,
+    )
+
+    statement, parameters = connection.cursor_instance.executed[0]
+    assert "UPDATE processing_runs" in statement
+    assert "INSERT INTO vehicle_observations" not in statement
+    assert parameters == ("completed", 100, 3, 7)
+    assert connection.committed is True
 
 
 def test_fail_run_records_error_and_commits():

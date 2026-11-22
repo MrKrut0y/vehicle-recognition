@@ -137,6 +137,9 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 Файл `.env` используется одновременно Docker Compose и Python-приложением.
 При успешной обработке база получает запись запуска, подтверждённые наблюдения
 машин и все временные ID трекера, которые были объединены в каждую машину.
+Во время трансляции завершённые и подтверждённые машины сохраняются сразу, не
+дожидаясь остановки всего процесса. Повторная запись того же `vehicle_id`
+обновляет существующее наблюдение и не создаёт дубликат.
 
 Срок хранения завершённых результатов задаётся в `.env`, например:
 
@@ -268,6 +271,10 @@ Save processing results after the database container becomes healthy:
 ```powershell
 python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 ```
+
+Finalized stream observations are persisted while the run is still active.
+Saving the same `vehicle_id` again updates its existing observation instead of
+creating a duplicate.
 
 Delete processing results while preserving camera records:
 

@@ -147,17 +147,47 @@ class MySQLRepository:
         self,
         run_id: int,
         processed_frames: int,
-        source_fps: float,
-        vehicle_ids: set[int],
-        vehicles: dict[int, TrackState],
-        frame_diagonal: float,
-        image_paths: dict[int, Path],
+        accepted_observations: int,
         status: str = "completed",
     ) -> None:
-        """Транзакционно сохраняет результат успешно завершённой обработки."""
+        """Завершает запуск после сохранения всех его наблюдений."""
         if status not in {"completed", "cancelled"}:
             raise ValueError(f"Unsupported final run status: {status}")
 
+        connection = self.connection_factory(**self.config.connection_arguments())
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute(
+                """
+                UPDATE processing_runs
+                SET status = %s,
+                    finished_at = CURRENT_TIMESTAMP(6),
+                    processed_frames = %s,
+                    accepted_observations = %s,
+                    error_message = NULL
+                WHERE run_id = %s
+                """,
+                (status, processed_frames, accepted_observations, run_id),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            cursor.close()
+            connection.close()
+
+    def save_observations(
+        self,
+        run_id: int,
+        vehicle_ids: set[int],
+        vehicles: dict[int, TrackState],
+        source_fps: float,
+        frame_diagonal: float,
+        image_paths: dict[int, Path],
+    ) -> None:
+        """Сохраняет завершённые наблюдения, не закрывая текущий запуск."""
         connection = self.connection_factory(**self.config.connection_arguments())
         cursor = connection.cursor()
 
@@ -173,20 +203,8 @@ class MySQLRepository:
                     frame_diagonal,
                     image_paths.get(vehicle_id),
                 )
-                self._insert_tracker_ids(cursor, observation_id, state)
+                self._replace_tracker_ids(cursor, observation_id, state)
 
-            cursor.execute(
-                """
-                UPDATE processing_runs
-                SET status = %s,
-                    finished_at = CURRENT_TIMESTAMP(6),
-                    processed_frames = %s,
-                    accepted_observations = %s,
-                    error_message = NULL
-                WHERE run_id = %s
-                """,
-                (status, processed_frames, len(vehicle_ids), run_id),
-            )
             connection.commit()
         except Exception:
             connection.rollback()
@@ -378,6 +396,20 @@ class MySQLRepository:
                 image_path
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                observation_id = LAST_INSERT_ID(observation_id),
+                vehicle_type = VALUES(vehicle_type),
+                confidence = VALUES(confidence),
+                first_frame = VALUES(first_frame),
+                last_frame = VALUES(last_frame),
+                frames_seen = VALUES(frames_seen),
+                first_seen_seconds = VALUES(first_seen_seconds),
+                last_seen_seconds = VALUES(last_seen_seconds),
+                movement_ratio = VALUES(movement_ratio),
+                pixel_motion_frames = VALUES(pixel_motion_frames),
+                max_pixel_motion_ratio = VALUES(max_pixel_motion_ratio),
+                completion_reason = VALUES(completion_reason),
+                image_path = COALESCE(VALUES(image_path), image_path)
             """,
             (
                 run_id,
@@ -404,12 +436,16 @@ class MySQLRepository:
         return int(observation_id)
 
     @staticmethod
-    def _insert_tracker_ids(
+    def _replace_tracker_ids(
         cursor: Any,
         observation_id: int,
         state: TrackState,
     ) -> None:
-        """Сохраняет все временные ID трекера, объединённые в наблюдение."""
+        """Заменяет временные ID трекера актуальным набором наблюдения."""
+        cursor.execute(
+            "DELETE FROM observation_tracker_ids WHERE observation_id = %s",
+            (observation_id,),
+        )
         tracker_rows = [
             (observation_id, tracker_id, frames_seen)
             for tracker_id, frames_seen in sorted(state.tracker_id_frames.items())
