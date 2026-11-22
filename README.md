@@ -195,9 +195,9 @@ python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --sa
 DATABASE_RETENTION_DAYS=30
 ```
 
-При каждом запуске с `--save-to-database` результаты старше 30 дней будут
-удаляться автоматически. Значение `0` отключает автоматическую очистку.
-Активные запуски и записи камер не удаляются.
+При каждом запуске с `--save-to-database`, а затем каждые 24 часа непрерывной
+работы результаты старше 30 дней будут удаляться автоматически. Значение `0`
+отключает автоматическую очистку. Активные запуски и записи камер не удаляются.
 
 Чтобы удалить результаты обработки, сохранив записи камер, выполните:
 
@@ -382,6 +382,9 @@ Set the automatic retention period in `.env` (`0` disables it):
 ```dotenv
 DATABASE_RETENTION_DAYS=30
 ```
+
+Retention runs when the application starts and then every 24 hours during
+continuous processing. Active runs and camera records are never removed.
 
 Delete only completed results older than a selected number of days:
 

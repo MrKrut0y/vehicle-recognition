@@ -13,6 +13,7 @@ from vehicle_recognition.frame_pacer import FramePacer
 from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
 from vehicle_recognition.motion import PixelMotionAnalyzer
+from vehicle_recognition.periodic_trigger import PeriodicTrigger
 from vehicle_recognition.progress import build_progress_message, print_progress
 from vehicle_recognition.result_persistence import persist_new_observations
 from vehicle_recognition.stream_source import StreamSource, is_stream_url
@@ -21,6 +22,7 @@ from vehicle_recognition.visualizer import draw_detections
 
 logger = logging.getLogger(__name__)
 DATABASE_PROGRESS_UPDATE_INTERVAL = 100
+DATABASE_RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 def positive_int(value: str) -> int:
@@ -31,6 +33,26 @@ def positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("value must be greater than zero")
 
     return parsed_value
+
+
+def apply_database_retention(repository: MySQLRepository) -> None:
+    """Удаляет устаревшие результаты, если для базы настроен срок хранения."""
+    retention_days = repository.config.retention_days
+
+    if retention_days is None:
+        return
+
+    cleanup_summary = repository.clear_results_older_than(retention_days)
+    logger.info(
+        (
+            "Database retention applied: days=%d runs=%d "
+            "observations=%d tracker_ids=%d"
+        ),
+        retention_days,
+        cleanup_summary.processing_runs,
+        cleanup_summary.vehicle_observations,
+        cleanup_summary.tracker_ids,
+    )
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -160,6 +182,7 @@ def main() -> None:
 
     database_repository: MySQLRepository | None = None
     database_run_id: int | None = None
+    retention_trigger: PeriodicTrigger | None = None
 
     if arguments.save_to_database:
         database_repository = MySQLRepository.from_environment()
@@ -172,20 +195,10 @@ def main() -> None:
                 recovered_run_count,
             )
 
+        apply_database_retention(database_repository)
+
         if database_repository.config.retention_days is not None:
-            cleanup_summary = database_repository.clear_results_older_than(
-                database_repository.config.retention_days
-            )
-            logger.info(
-                (
-                    "Database retention applied: days=%d runs=%d "
-                    "observations=%d tracker_ids=%d"
-                ),
-                database_repository.config.retention_days,
-                cleanup_summary.processing_runs,
-                cleanup_summary.vehicle_observations,
-                cleanup_summary.tracker_ids,
-            )
+            retention_trigger = PeriodicTrigger(DATABASE_RETENTION_INTERVAL_SECONDS)
 
         camera_id: int | None = None
 
@@ -268,6 +281,13 @@ def main() -> None:
                     processed_frames=frame_number,
                     accepted_observations=total,
                 )
+
+            if (
+                database_repository is not None
+                and retention_trigger is not None
+                and retention_trigger.is_due()
+            ):
+                apply_database_retention(database_repository)
 
             is_first_frame = frame_number == 1
             is_update_frame = frame_number % 10 == 0
