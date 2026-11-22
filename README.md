@@ -34,6 +34,18 @@ python -m pip install -r requirements.txt
 python -m vehicle_recognition.main ".\videos\test3.mp4"
 ```
 
+Вместо файла можно передать URL трансляции HLS, RTSP или RTMP:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8"
+```
+
+Поток обрабатывается до `Ctrl+C`. Для короткой проверки ограничьте число кадров:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --max-frames 60
+```
+
 Чтобы сохранить видео с рамками, идентификаторами и текущим количеством
 транспорта, укажите выходной файл:
 
@@ -60,9 +72,12 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
 | `--log-file` | Нет | Файл подробного журнала; по умолчанию `results/vehicle_recognition.log` |
 | `--save-to-database` | Нет | Сохранить запуск и подтверждённые наблюдения в MySQL |
+| `--max-frames` | Нет | Остановить обработку после указанного числа кадров |
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
 Работа без показа кадров обычно выполняется быстрее.
+При кратком сетевом обрыве поток автоматически переподключается. Использование
+`--output` без ограничения времени создаёт постоянно растущий видеофайл.
 
 ### Режимы вывода
 
@@ -160,6 +175,18 @@ Process a video without saving annotated output:
 python -m vehicle_recognition.main ".\videos\test3.mp4"
 ```
 
+Process an HLS, RTSP, or RTMP stream until `Ctrl+C` is pressed:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8"
+```
+
+Limit a stream test to 60 frames:
+
+```powershell
+python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --max-frames 60
+```
+
 Save an annotated video:
 
 ```powershell
@@ -185,9 +212,12 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
 | `--log-file` | No | Detailed processing log; defaults to `results/vehicle_recognition.log` |
 | `--save-to-database` | No | Save the run and confirmed observations to MySQL |
+| `--max-frames` | No | Stop processing after the specified number of frames |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
-preview is usually faster.
+preview is usually faster. The application attempts to reconnect after a short
+stream interruption. Using `--output` without a frame limit creates a video file
+that continues to grow until processing stops.
 
 ### Tests
 

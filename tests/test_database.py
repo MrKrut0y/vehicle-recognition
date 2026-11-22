@@ -78,7 +78,7 @@ def test_create_run_returns_generated_id_and_commits():
     connection = FakeConnection()
     repository = MySQLRepository(make_config(), lambda **arguments: connection)
 
-    run_id = repository.create_run("video.mp4", 100, 25.0)
+    run_id = repository.create_run("video", "video.mp4", 100, 25.0)
 
     assert run_id == 7
     assert connection.committed is True

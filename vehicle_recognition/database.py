@@ -80,11 +80,15 @@ class MySQLRepository:
 
     def create_run(
         self,
+        source_type: str,
         source_name: str,
         total_frames: int | None,
         source_fps: float | None,
     ) -> int:
         """Создаёт запись о начавшейся обработке и возвращает её ID."""
+        if source_type not in {"video", "stream"}:
+            raise ValueError(f"Unsupported source type: {source_type}")
+
         connection = self.connection_factory(**self.config.connection_arguments())
         cursor = connection.cursor()
 
@@ -98,9 +102,9 @@ class MySQLRepository:
                     total_frames,
                     source_fps
                 )
-                VALUES ('video', %s, 'running', %s, %s)
+                VALUES (%s, %s, 'running', %s, %s)
                 """,
-                (source_name, total_frames, source_fps),
+                (source_type, source_name, total_frames, source_fps),
             )
             run_id = cursor.lastrowid
 
@@ -125,8 +129,12 @@ class MySQLRepository:
         vehicles: dict[int, TrackState],
         frame_diagonal: float,
         image_paths: dict[int, Path],
+        status: str = "completed",
     ) -> None:
         """Транзакционно сохраняет результат успешно завершённой обработки."""
+        if status not in {"completed", "cancelled"}:
+            raise ValueError(f"Unsupported final run status: {status}")
+
         connection = self.connection_factory(**self.config.connection_arguments())
         cursor = connection.cursor()
 
@@ -147,14 +155,14 @@ class MySQLRepository:
             cursor.execute(
                 """
                 UPDATE processing_runs
-                SET status = 'completed',
+                SET status = %s,
                     finished_at = CURRENT_TIMESTAMP(6),
                     processed_frames = %s,
                     accepted_observations = %s,
                     error_message = NULL
                 WHERE run_id = %s
                 """,
-                (processed_frames, len(vehicle_ids), run_id),
+                (status, processed_frames, len(vehicle_ids), run_id),
             )
             connection.commit()
         except Exception:

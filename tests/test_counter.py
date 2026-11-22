@@ -282,6 +282,16 @@ def test_stale_track_is_finalized_after_missing_frame_limit():
     assert counter.vehicles[1].completion_reason == "track_lost"
 
 
+def test_finalize_all_records_stream_completion_reason():
+    counter = VehicleCounter()
+    counter.vehicles = {1: TrackState(last_seen_frame=1, frames_seen=1)}
+
+    counter.finalize_all("stream_stopped")
+
+    assert counter.vehicles[1].finalized is True
+    assert counter.vehicles[1].completion_reason == "stream_stopped"
+
+
 def test_unmatched_recovery_candidate_remains_separate():
     counter = VehicleCounter(turn_recovery_confirm_frames=1)
     detection = Detection(

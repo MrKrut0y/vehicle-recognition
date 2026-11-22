@@ -13,10 +13,21 @@ from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
 from vehicle_recognition.motion import PixelMotionAnalyzer
 from vehicle_recognition.progress import build_progress_message, print_progress
+from vehicle_recognition.stream_source import StreamSource, is_stream_url
 from vehicle_recognition.video_writer import VideoFileWriter
 from vehicle_recognition.visualizer import draw_detections
 
 logger = logging.getLogger(__name__)
+
+
+def positive_int(value: str) -> int:
+    """Преобразует положительный аргумент командной строки в число."""
+    parsed_value = int(value)
+
+    if parsed_value <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+
+    return parsed_value
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -25,7 +36,10 @@ def parse_arguments() -> argparse.Namespace:
         description="Обработка видео с транспортными средствами."
     )
 
-    parser.add_argument("source", type=Path, help="Путь к исходному видеофайлу.")
+    parser.add_argument(
+        "source",
+        help="Путь к видеофайлу или URL сетевой трансляции.",
+    )
 
     parser.add_argument(
         "--output", type=Path, help="Путь для сохранения обработанного видео."
@@ -63,6 +77,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Сохранять результаты обработки в MySQL.",
     )
 
+    parser.add_argument(
+        "--max-frames",
+        type=positive_int,
+        help="Остановить обработку после указанного числа кадров.",
+    )
+
     return parser.parse_args()
 
 
@@ -72,17 +92,38 @@ def main() -> None:
 
     configure_logging(arguments.verbose, arguments.log_file)
 
-    logger.info("Source: %s", arguments.source)
+    source_text = arguments.source
+    source_is_stream = is_stream_url(source_text)
+    source_type = "stream" if source_is_stream else "video"
 
-    file_source = FileSource(arguments.source)
+    logger.info("Source: %s", source_text)
 
-    if not file_source.read_metadata():
+    if source_is_stream:
+        media_source = StreamSource(source_text)
+        detector_source: Path | None = None
+        database_source_name = source_text
+    else:
+        detector_source = Path(source_text)
+        media_source = FileSource(detector_source)
+        database_source_name = str(detector_source.resolve())
+
+    if not media_source.read_metadata():
         return
+
+    progress_total_frames = media_source.total_frames
+    if arguments.max_frames is not None:
+        if progress_total_frames is None:
+            progress_total_frames = arguments.max_frames
+        else:
+            progress_total_frames = min(
+                progress_total_frames,
+                arguments.max_frames,
+            )
 
     logger.info(
         "Frames: %s | FPS: %.2f",
-        file_source.total_frames if file_source.total_frames else "unknown",
-        file_source.fps or 0.0,
+        progress_total_frames if progress_total_frames else "unknown",
+        media_source.fps or 0.0,
     )
     logger.info("Tracker: tracker_static_reid.yaml")
     logger.info(
@@ -106,9 +147,10 @@ def main() -> None:
     if arguments.save_to_database:
         database_repository = MySQLRepository.from_environment()
         database_run_id = database_repository.create_run(
-            source_name=str(arguments.source.resolve()),
-            total_frames=file_source.total_frames,
-            source_fps=file_source.fps,
+            source_type=source_type,
+            source_name=database_source_name,
+            total_frames=progress_total_frames,
+            source_fps=media_source.fps,
         )
         logger.info("Database run created: run_id=%d", database_run_id)
 
@@ -116,12 +158,19 @@ def main() -> None:
 
     processed_frames = 0
     started_at = time.perf_counter()
+    run_cancelled = False
+
+    if source_is_stream:
+        tracked_frames = (
+            (frame, detector.detect(frame)) for frame in media_source.generate_frames()
+        )
+    else:
+        if detector_source is None:
+            raise RuntimeError("Local video path was not initialized")
+        tracked_frames = detector.track_video(detector_source)
 
     try:
-        for frame_number, (frame, detections) in enumerate(
-            detector.track_video(arguments.source),
-            start=1,
-        ):
+        for frame_number, (frame, detections) in enumerate(tracked_frames, start=1):
             processed_frames = frame_number
 
             motion_analyzer.update(frame, detections, frame_number)
@@ -135,14 +184,14 @@ def main() -> None:
 
             is_first_frame = frame_number == 1
             is_update_frame = frame_number % 10 == 0
-            is_last_frame = frame_number == file_source.total_frames
+            is_last_frame = frame_number == progress_total_frames
 
             if is_first_frame or is_update_frame or is_last_frame:
                 elapsed_seconds = time.perf_counter() - started_at
 
                 progress_message = build_progress_message(
                     frame_number,
-                    file_source.total_frames,
+                    progress_total_frames,
                     total,
                     elapsed_seconds,
                     stitched_count,
@@ -152,7 +201,7 @@ def main() -> None:
                 if not arguments.verbose:
                     print_progress(
                         frame_number,
-                        file_source.total_frames,
+                        progress_total_frames,
                         total,
                         elapsed_seconds,
                         stitched_count,
@@ -165,7 +214,7 @@ def main() -> None:
                 if video_writer is None:
                     height, width = annotated_frame.shape[:2]
 
-                    fps = file_source.fps
+                    fps = media_source.fps
                     if fps is None or fps <= 0:
                         # Некоторые источники не сообщают FPS, поэтому используем запасное значение.
                         fps = 30.0
@@ -181,7 +230,17 @@ def main() -> None:
             if arguments.show:
                 cv2.imshow("Vehicle detection", annotated_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
+                    run_cancelled = True
                     break
+            if (
+                arguments.max_frames is not None
+                and frame_number >= arguments.max_frames
+            ):
+                logger.info("Frame limit reached: max_frames=%d", arguments.max_frames)
+                break
+    except KeyboardInterrupt:
+        run_cancelled = True
+        logger.info("Processing stopped by user")
     except Exception as error:
         if database_repository is not None and database_run_id is not None:
             try:
@@ -197,6 +256,10 @@ def main() -> None:
                 )
         raise
     finally:
+        close_tracked_frames = getattr(tracked_frames, "close", None)
+        if close_tracked_frames is not None:
+            close_tracked_frames()
+
         # Освобождаем ресурсы даже при ошибке или досрочном завершении обработки.
         if video_writer is not None:
             video_writer.release()
@@ -208,9 +271,15 @@ def main() -> None:
         elapsed_seconds = time.perf_counter() - started_at
         average_fps = processed_frames / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
-        counter.finalize_all()
+        completion_reason = "stream_stopped" if source_is_stream else "video_ended"
+        counter.finalize_all(completion_reason)
+
+        image_output_directory = arguments.images_dir
+        if database_run_id is not None:
+            image_output_directory /= f"run_{database_run_id:06d}"
+
         saved_image_paths = save_vehicle_images(
-            arguments.images_dir,
+            image_output_directory,
             counter.counted_vehicle_ids,
             counter.vehicles,
         )
@@ -219,11 +288,12 @@ def main() -> None:
             database_repository.complete_run(
                 run_id=database_run_id,
                 processed_frames=processed_frames,
-                source_fps=file_source.fps or 30.0,
+                source_fps=media_source.fps or 30.0,
                 vehicle_ids=counter.counted_vehicle_ids,
                 vehicles=counter.vehicles,
                 frame_diagonal=counter.frame_diagonal,
                 image_paths=saved_image_paths,
+                status="cancelled" if run_cancelled else "completed",
             )
             logger.info("Database run completed: run_id=%d", database_run_id)
     except Exception as error:

@@ -91,7 +91,9 @@ CREATE TABLE IF NOT EXISTS vehicle_observations (
             AND max_pixel_motion_ratio <= 1
         ),
     CONSTRAINT chk_vehicle_observations_completion
-        CHECK (completion_reason IN ('track_lost', 'video_ended')),
+        CHECK (
+            completion_reason IN ('track_lost', 'video_ended', 'stream_stopped')
+        ),
     INDEX idx_vehicle_observations_run_type (run_id, vehicle_type),
     INDEX idx_vehicle_observations_created (created_at)
 ) ENGINE = InnoDB

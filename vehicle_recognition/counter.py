@@ -519,14 +519,14 @@ class VehicleCounter:
                 frame_number,
             )
 
-    def finalize_all(self) -> None:
+    def finalize_all(self, completion_reason: str = "video_ended") -> None:
         """Закрывает оставшиеся активные состояния после окончания видео."""
         for vehicle_id, state in self.vehicles.items():
             self._finalize_track(
                 vehicle_id,
                 state,
                 self.frame_diagonal,
-                "video_ended",
+                completion_reason,
             )
 
     def _merge_vehicle_states(
