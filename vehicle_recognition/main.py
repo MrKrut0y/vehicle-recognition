@@ -9,6 +9,7 @@ from vehicle_recognition.counter import VehicleCounter
 from vehicle_recognition.database import MySQLRepository
 from vehicle_recognition.detector import VehicleDetector
 from vehicle_recognition.file_source import FileSource
+from vehicle_recognition.frame_pacer import FramePacer
 from vehicle_recognition.image_writer import save_vehicle_images
 from vehicle_recognition.logging_config import configure_logging
 from vehicle_recognition.motion import PixelMotionAnalyzer
@@ -172,6 +173,7 @@ def main() -> None:
         logger.info("Database run created: run_id=%d", database_run_id)
 
     video_writer: VideoFileWriter | None = None
+    frame_pacer = FramePacer(media_source.fps or 30.0)
     persisted_vehicle_ids: set[int] = set()
     saved_image_paths: dict[int, Path] = {}
     image_output_directory = arguments.images_dir
@@ -266,7 +268,7 @@ def main() -> None:
 
             if arguments.show:
                 cv2.imshow("Vehicle detection", annotated_frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                if cv2.waitKey(frame_pacer.next_delay_ms()) & 0xFF == ord("q"):
                     run_cancelled = True
                     break
             if (
