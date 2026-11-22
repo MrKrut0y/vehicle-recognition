@@ -64,3 +64,24 @@ def test_file_source_releases_capture_when_video_cannot_be_opened(
     assert frames == []
     assert f"Не удалось открыть видео: {source_path}" in caplog.text
     capture.release.assert_called_once_with()
+
+
+def test_file_source_reads_metadata_without_reading_frames(tmp_path, monkeypatch):
+    source_path = tmp_path / "video.mp4"
+    source_path.touch()
+    capture = Mock()
+    capture.isOpened.return_value = True
+    capture.get.side_effect = [30.0, 2551.0]
+    monkeypatch.setattr(
+        "vehicle_recognition.file_source.cv2.VideoCapture",
+        lambda _: capture,
+    )
+    file_source = FileSource(source_path)
+
+    opened = file_source.read_metadata()
+
+    assert opened is True
+    assert file_source.fps == 30.0
+    assert file_source.total_frames == 2551
+    capture.read.assert_not_called()
+    capture.release.assert_called_once_with()

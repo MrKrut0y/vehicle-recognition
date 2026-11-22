@@ -74,7 +74,6 @@ def test_merge_vehicle_ids_removes_secondary_vehicle_and_related_state():
         3: TrackState(),
     }
     counter.counted_vehicle_ids = {2}
-    counter.pending_recovery_vehicle_ids = {2}
     counter.concurrent_pair_evidence = {
         (1, 2): (5, 10),
         (2, 3): (2, 10),
@@ -85,7 +84,6 @@ def test_merge_vehicle_ids_removes_secondary_vehicle_and_related_state():
 
     assert 2 not in counter.vehicles
     assert counter.counted_vehicle_ids == {1}
-    assert 2 not in counter.pending_recovery_vehicle_ids
     assert all(2 not in pair for pair in counter.concurrent_pair_evidence)
     assert counter.concurrent_pair_evidence[(1, 3)] == (1, 10)
 
@@ -132,28 +130,7 @@ def test_concurrent_tracks_merge_only_after_required_matching_frames(monkeypatch
     assert counter.raw_to_vehicle[101] == counter.raw_to_vehicle[202]
 
 
-def test_default_concurrent_merge_rejects_five_frame_overlap(monkeypatch):
-    monkeypatch.setattr(
-        "vehicle_recognition.counter.concurrent_tracks_match",
-        lambda first_state, second_state: True,
-    )
-    counter = VehicleCounter(turn_recovery_confirm_frames=100)
-    detections = [
-        Detection(2, "car", 0.9, 10.0, 10.0, 30.0, 30.0, 101),
-        Detection(2, "car", 0.9, 11.0, 10.0, 31.0, 30.0, 202),
-    ]
-
-    for frame_number in range(1, 6):
-        counter.update(detections, (100, 100), frame_number)
-
-    assert len(counter.vehicles) == 2
-
-    counter.update(detections, (100, 100), 6)
-
-    assert len(counter.vehicles) == 1
-
-
-def test_concurrent_match_evidence_survives_short_detection_gaps(monkeypatch):
+def test_concurrent_match_evidence_requires_consecutive_frames(monkeypatch):
     def matches_on_odd_frames(first_state, second_state):
         return first_state.last_seen_frame % 2 == 1
 
@@ -164,100 +141,6 @@ def test_concurrent_match_evidence_survives_short_detection_gaps(monkeypatch):
     counter = VehicleCounter(
         turn_recovery_confirm_frames=100,
         concurrent_merge_frames=5,
-        large_vehicle_evidence_max_gap=3,
-    )
-    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
-    detections = [
-        Detection(
-            5,
-            "bus",
-            0.9,
-            10.0,
-            10.0,
-            50.0,
-            30.0,
-            101,
-            appearance_histogram=histogram,
-        ),
-        Detection(
-            5,
-            "bus",
-            0.9,
-            11.0,
-            10.0,
-            31.0,
-            30.0,
-            202,
-            appearance_histogram=histogram,
-        ),
-    ]
-
-    for frame_number in range(1, 9):
-        counter.update(detections, (100, 100), frame_number)
-        assert len(counter.vehicles) == 2
-
-    counter.update(detections, (100, 100), 9)
-
-    assert len(counter.vehicles) == 1
-
-
-def test_same_size_bus_tracks_require_consecutive_matching_frames(monkeypatch):
-    def matches_on_odd_frames(first_state, second_state):
-        return first_state.last_seen_frame % 2 == 1
-
-    monkeypatch.setattr(
-        "vehicle_recognition.counter.concurrent_tracks_match",
-        matches_on_odd_frames,
-    )
-    histogram = np.array([[1.0, 0.0]], dtype=np.float32)
-    counter = VehicleCounter(
-        turn_recovery_confirm_frames=100,
-        concurrent_merge_frames=5,
-        large_vehicle_evidence_max_gap=3,
-    )
-    detections = [
-        Detection(
-            5,
-            "bus",
-            0.9,
-            10.0,
-            10.0,
-            30.0,
-            30.0,
-            101,
-            appearance_histogram=histogram,
-        ),
-        Detection(
-            5,
-            "bus",
-            0.9,
-            11.0,
-            10.0,
-            31.0,
-            30.0,
-            202,
-            appearance_histogram=histogram,
-        ),
-    ]
-
-    for frame_number in range(1, 10):
-        counter.update(detections, (100, 100), frame_number)
-
-    assert len(counter.vehicles) == 2
-
-
-def test_car_match_evidence_does_not_survive_detection_gaps(monkeypatch):
-    def matches_on_odd_frames(first_state, second_state):
-        return first_state.last_seen_frame % 2 == 1
-
-    monkeypatch.setattr(
-        "vehicle_recognition.counter.concurrent_tracks_match",
-        matches_on_odd_frames,
-    )
-    counter = VehicleCounter(
-        turn_recovery_confirm_frames=100,
-        concurrent_merge_frames=5,
-        large_vehicle_evidence_max_gap=3,
     )
     detections = [
         Detection(2, "car", 0.9, 10.0, 10.0, 30.0, 30.0, 101),
@@ -270,7 +153,7 @@ def test_car_match_evidence_does_not_survive_detection_gaps(monkeypatch):
     assert len(counter.vehicles) == 2
 
 
-def test_merged_tracker_ids_add_only_one_observation_per_frame():
+def test_merged_tracker_ids_record_each_tracker_observation():
     counter = VehicleCounter(turn_recovery_confirm_frames=100)
     counter.vehicles = {1: TrackState()}
     counter.raw_to_vehicle = {
@@ -303,9 +186,12 @@ def test_merged_tracker_ids_add_only_one_observation_per_frame():
     counter.update(detections, (100, 100), 1)
 
     state = counter.vehicles[1]
-    assert state.frames_seen == 1
+    assert state.frames_seen == 2
     assert state.last_center == (30.0, 20.0)
-    assert list(state.recent_centers) == [(1, (30.0, 20.0))]
+    assert list(state.recent_centers) == [
+        (1, (20, 20)),
+        (1, (30, 20)),
+    ]
 
 
 def test_new_tracker_id_is_stitched_to_recent_lost_vehicle():
@@ -348,7 +234,7 @@ def test_new_tracker_id_is_stitched_to_recent_lost_vehicle():
     assert counter.vehicles[1].frames_seen == 3
 
 
-def test_stitch_uses_last_position_when_prediction_is_wrong_after_turn():
+def test_stitch_uses_predicted_position_like_reference():
     histogram = np.array([[1.0, 0.0]], dtype=np.float32)
     counter = VehicleCounter(turn_recovery_confirm_frames=100)
     state = TrackState()
@@ -381,8 +267,8 @@ def test_stitch_uses_last_position_when_prediction_is_wrong_after_turn():
 
     counter.update([detection], (100, 100), 3)
 
-    assert counter.raw_to_vehicle[202] == 1
-    assert set(counter.vehicles) == {1}
+    assert counter.raw_to_vehicle[202] == 2
+    assert set(counter.vehicles) == {1, 2}
 
 
 def test_stale_track_is_finalized_after_missing_frame_limit():
@@ -394,7 +280,7 @@ def test_stale_track_is_finalized_after_missing_frame_limit():
     assert counter.vehicles[1].finalized is True
 
 
-def test_unmatched_recovery_candidate_remains_pending_for_later_frames():
+def test_unmatched_recovery_candidate_remains_separate():
     counter = VehicleCounter(turn_recovery_confirm_frames=1)
     detection = Detection(
         class_id=2,
@@ -410,7 +296,7 @@ def test_unmatched_recovery_candidate_remains_pending_for_later_frames():
     counter.update([detection], (100, 100), 1)
 
     vehicle_id = counter.raw_to_vehicle[101]
-    assert vehicle_id in counter.pending_recovery_vehicle_ids
+    assert vehicle_id in counter.vehicles
 
 
 def test_vehicle_is_counted_after_track_motion_and_pixel_motion_are_confirmed():

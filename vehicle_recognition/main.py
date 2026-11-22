@@ -49,6 +49,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Каталог для лучших снимков подтверждённых машин.",
     )
 
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=Path("results/vehicle_recognition.log"),
+        help="Файл для подробного журнала обработки.",
+    )
+
     return parser.parse_args()
 
 
@@ -56,17 +63,21 @@ def main() -> None:
     """Запускает чтение видео и распознавание транспорта."""
     arguments = parse_arguments()
 
-    configure_logging(arguments.verbose)
+    configure_logging(arguments.verbose, arguments.log_file)
 
     logger.info(
-        "Запуск обработки: source=%s output=%s images_dir=%s show=%s",
+        "Запуск обработки: source=%s output=%s images_dir=%s log_file=%s show=%s",
         arguments.source,
         arguments.output,
         arguments.images_dir,
+        arguments.log_file,
         arguments.show,
     )
 
     file_source = FileSource(arguments.source)
+
+    if not file_source.read_metadata():
+        return
 
     model_path = "yolov8s.pt"
     detector = VehicleDetector(model_path)
@@ -80,10 +91,12 @@ def main() -> None:
     started_at = time.perf_counter()
 
     try:
-        for frame_number, frame in enumerate(file_source.generate_frames(), start=1):
+        for frame_number, (frame, detections) in enumerate(
+            detector.track_video(arguments.source),
+            start=1,
+        ):
             processed_frames = frame_number
 
-            detections = detector.detect(frame)
             motion_analyzer.update(frame, detections, frame_number)
 
             height, width = frame.shape[:2]

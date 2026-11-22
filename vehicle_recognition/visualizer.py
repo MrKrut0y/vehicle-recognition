@@ -35,12 +35,17 @@ def draw_detections(frame, detections: list[Detection], total: int):
 
         cv2.rectangle(annotated_frame, point1, point2, color, 2)
 
-        if detection.track_id is None:
-            track_label = "ID -"
-        else:
-            track_label = f"ID {detection.track_id}"
+        vehicle_label = (
+            f"V{detection.vehicle_id}" if detection.vehicle_id is not None else "V-"
+        )
+        tracker_label = (
+            f"T{detection.track_id}" if detection.track_id is not None else "T-"
+        )
 
-        label = f"{track_label} {detection.class_name} {detection.confidence:.2f}"
+        label = (
+            f"{vehicle_label}/{tracker_label} "
+            f"{detection.class_name} {detection.confidence:.2f}"
+        )
 
         text_position = (
             int(detection.x1),

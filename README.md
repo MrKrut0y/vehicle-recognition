@@ -45,6 +45,10 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 программа выполняет распознавание и выводит итоговое количество, но не сохраняет
 обработанное видео.
 
+В подписи рамки `V` обозначает внутренний ID физической машины, а `T` —
+временный ID трекера. После краткого перекрытия `T` может измениться, но при
+успешном восстановлении `V` остаётся прежним.
+
 ### Аргументы командной строки
 
 | Аргумент | Обязательный | Назначение |
@@ -54,6 +58,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--show` | Нет | Показывать обработанные кадры во время работы |
 | `--verbose` | Нет | Выводить подробный журнал событий вместо однострочного прогресса |
 | `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
+| `--log-file` | Нет | Файл подробного журнала; по умолчанию `results/vehicle_recognition.log` |
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
 Работа без показа кадров обычно выполняется быстрее.
@@ -74,6 +79,9 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 ```powershell
 python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test3_result.mp4" --verbose
 ```
+
+Подробный журнал всегда записывается в файл, даже без `--verbose`. При новом
+запуске указанный файл перезаписывается, чтобы события разных тестов не смешивались.
 
 ### Тесты
 
@@ -126,6 +134,10 @@ Save an annotated video:
 python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test3_result.mp4"
 ```
 
+Frame labels use `V` for the canonical physical-vehicle ID and `T` for the
+temporary tracker ID. After a short occlusion, `T` can change while a
+successfully recovered vehicle keeps the same `V`.
+
 Enable detailed event logs:
 
 ```powershell
@@ -139,6 +151,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--show` | No | Display processed frames while running |
 | `--verbose` | No | Print detailed tracking events instead of the one-line progress display |
 | `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
+| `--log-file` | No | Detailed processing log; defaults to `results/vehicle_recognition.log` |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
 preview is usually faster.

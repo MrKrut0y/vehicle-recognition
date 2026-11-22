@@ -15,6 +15,7 @@ class Detection:
     x2: float
     y2: float
     track_id: int | None = None
+    vehicle_id: int | None = None
     appearance_histogram: np.ndarray | None = None
     crop: np.ndarray | None = field(default=None, repr=False, compare=False)
     pixel_motion_ratio: float = 0.0

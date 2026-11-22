@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ultralytics import YOLO
 
 from vehicle_recognition.appearance import calculate_appearance_histogram
@@ -28,8 +30,33 @@ class VehicleDetector:
             tracker="tracker_static_reid.yaml",
         )
 
-        result = results[0]
+        return self._build_detections(results[0], frame)
+
+    def track_video(self, source: Path):
+        """Последовательно обрабатывает видео единым потоком трекера."""
+        results = self.model.track(
+            source=str(source),
+            stream=True,
+            verbose=False,
+            classes=VEHICLE_CLASS_IDS,
+            conf=0.25,
+            iou=0.45,
+            agnostic_nms=True,
+            persist=True,
+            tracker="tracker_static_reid.yaml",
+        )
+
+        for result in results:
+            frame = result.orig_img.copy()
+            yield frame, self._build_detections(result, frame)
+
+    @staticmethod
+    def _build_detections(result, frame) -> list[Detection]:
+        """Преобразует результат Ultralytics во внутренние объекты Detection."""
         detections = []
+
+        if result.boxes is None or getattr(result.boxes, "id", None) is None:
+            return detections
 
         frame_height, frame_width = frame.shape[:2]
 
@@ -40,16 +67,16 @@ class VehicleDetector:
             if box.id is not None:
                 track_id = int(box.id[0].item())
 
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            raw_x1, raw_y1, raw_x2, raw_y2 = box.xyxy[0].tolist()
             class_id = int(box.cls[0].item())
             class_name = result.names[class_id]
             confidence = box.conf[0].item()
 
             # Координаты YOLO вещественные и могут выходить за границы кадра.
-            crop_x1 = min(max(int(x1), 0), frame_width)
-            crop_y1 = min(max(int(y1), 0), frame_height)
-            crop_x2 = min(max(int(x2), 0), frame_width)
-            crop_y2 = min(max(int(y2), 0), frame_height)
+            crop_x1 = min(max(int(raw_x1), 0), frame_width)
+            crop_y1 = min(max(int(raw_y1), 0), frame_height)
+            crop_x2 = min(max(int(raw_x2), 0), frame_width)
+            crop_y2 = min(max(int(raw_y2), 0), frame_height)
 
             crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
@@ -59,10 +86,10 @@ class VehicleDetector:
                 class_id=class_id,
                 class_name=class_name,
                 confidence=confidence,
-                x1=x1,
-                y1=y1,
-                x2=x2,
-                y2=y2,
+                x1=crop_x1,
+                y1=crop_y1,
+                x2=crop_x2,
+                y2=crop_y2,
                 track_id=track_id,
                 appearance_histogram=appearance_histogram,
                 crop=crop,

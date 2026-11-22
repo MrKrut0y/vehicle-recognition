@@ -11,7 +11,6 @@ from vehicle_recognition.geometry import (
     Box,
     calculate_box_area,
     calculate_iou,
-    calculate_smaller_coverage,
 )
 from vehicle_recognition.track_matching import concurrent_tracks_match
 from vehicle_recognition.track_state import TrackState
@@ -29,11 +28,7 @@ class VehicleCounter:
         turn_recovery_max_gap: int = 60,
         turn_recovery_distance_ratio: float = 0.04,
         turn_recovery_confirm_frames: int = 5,
-        concurrent_merge_frames: int = 6,
-        large_vehicle_evidence_max_gap: int = 15,
-        interrupted_bus_min_smaller_coverage: float = 0.75,
-        interrupted_bus_min_size_ratio: float = 1.5,
-        interrupted_bus_min_appearance_similarity: float = 0.75,
+        concurrent_merge_frames: int = 5,
         min_pixel_motion_frames: int = 5,
         max_missing_frames: int = 90,
         stitch_max_gap: int = 45,
@@ -44,8 +39,6 @@ class VehicleCounter:
         self.min_confirmed_frames = min_confirmed_frames
         # Множество не позволяет засчитать одну физическую машину повторно.
         self.counted_vehicle_ids: set[int] = set()
-        # Новые внутренние ID ожидают проверки: не являются ли они продолжением старого трека.
-        self.pending_recovery_vehicle_ids: set[int] = set()
         self.min_movement_ratio = min_movement_ratio
         # Связывает временный ID трекера с внутренним ID физической машины.
         self.raw_to_vehicle: dict[int, int] = {}
@@ -58,18 +51,13 @@ class VehicleCounter:
         # Для каждой пары храним число совпадений подряд и кадр последнего совпадения.
         self.concurrent_pair_evidence: dict[tuple[int, int], tuple[int, int]] = {}
         self.concurrent_merge_frames = concurrent_merge_frames
-        self.large_vehicle_evidence_max_gap = large_vehicle_evidence_max_gap
-        self.interrupted_bus_min_smaller_coverage = interrupted_bus_min_smaller_coverage
-        self.interrupted_bus_min_size_ratio = interrupted_bus_min_size_ratio
-        self.interrupted_bus_min_appearance_similarity = (
-            interrupted_bus_min_appearance_similarity
-        )
         self.min_pixel_motion_frames = min_pixel_motion_frames
         self.max_missing_frames = max_missing_frames
         self.stitch_max_gap = stitch_max_gap
         self.stitch_distance_ratio = stitch_distance_ratio
         self.stitch_appearance_threshold = stitch_appearance_threshold
         self.turn_recovery_appearance_threshold = turn_recovery_appearance_threshold
+        self.frame_diagonal = 0.0
 
     def update(
         self,
@@ -81,11 +69,10 @@ class VehicleCounter:
         width, height = frame_size
         frame_diagonal = math.hypot(width, height)
         frame_area = float(width * height)
+        self.frame_diagonal = frame_diagonal
 
         # Машины, видимые на текущем кадре, не считаются потерянными.
         seen_vehicle_ids: set[int] = set()
-        # Один внутренний ID должен получить не более одного наблюдения за кадр.
-        best_detections_by_vehicle_id: dict[int, Detection] = {}
 
         for detection in detections:
             tracker_id = detection.track_id
@@ -94,8 +81,8 @@ class VehicleCounter:
                 continue
 
             center = (
-                (detection.x1 + detection.x2) / 2,
-                (detection.y1 + detection.y2) / 2,
+                (detection.x1 + detection.x2) // 2,
+                (detection.y1 + detection.y2) // 2,
             )
             box: Box = (
                 detection.x1,
@@ -123,7 +110,6 @@ class VehicleCounter:
 
                     self.raw_to_vehicle[tracker_id] = vehicle_id
                     self.vehicles[vehicle_id] = TrackState()
-                    self.pending_recovery_vehicle_ids.add(vehicle_id)
 
                     logger.info(
                         "Создан кандидат: vehicle_id=%d tracker_id=%d frame=%d",
@@ -143,24 +129,8 @@ class VehicleCounter:
                         frame_number,
                     )
 
-            seen_vehicle_ids.add(vehicle_id)
-
-            current_best_detection = best_detections_by_vehicle_id.get(vehicle_id)
-
-            if (
-                current_best_detection is None
-                or detection.confidence > current_best_detection.confidence
-            ):
-                best_detections_by_vehicle_id[vehicle_id] = detection
-
-        for vehicle_id, detection in best_detections_by_vehicle_id.items():
-            center_x = (detection.x1 + detection.x2) / 2
-            center_y = (detection.y1 + detection.y2) / 2
-            center = (center_x, center_y)
-
-            box: Box = (detection.x1, detection.y1, detection.x2, detection.y2)
-
             state = self.vehicles[vehicle_id]
+            detection.vehicle_id = vehicle_id
 
             state.add_observation(
                 center,
@@ -175,75 +145,7 @@ class VehicleCounter:
                 pixel_motion_ratio=detection.pixel_motion_ratio,
                 has_pixel_motion=detection.has_pixel_motion,
             )
-
-            movement_ratio = state.displacement_ratio(frame_diagonal)
-
-            # Засчитываем только достаточно долгий и действительно движущийся трек.
-            if (
-                state.frames_seen >= self.min_confirmed_frames
-                and movement_ratio >= self.min_movement_ratio
-                and state.pixel_motion_frames >= self.min_pixel_motion_frames
-                and state.best_crop is not None
-                and vehicle_id not in self.counted_vehicle_ids
-            ):
-                self.counted_vehicle_ids.add(vehicle_id)
-
-                logger.info(
-                    (
-                        "Машина подтверждена: vehicle_id=%d "
-                        "frames=%d movement_ratio=%.4f motion_frames=%d frame=%d"
-                    ),
-                    vehicle_id,
-                    state.frames_seen,
-                    movement_ratio,
-                    state.pixel_motion_frames,
-                    frame_number,
-                )
-
-        # Объединение может удалять ID из исходного множества во время проверки.
-        pending_vehicle_ids_copy = self.pending_recovery_vehicle_ids.copy()
-
-        for new_vehicle_id in pending_vehicle_ids_copy:
-            if new_vehicle_id not in seen_vehicle_ids:
-                continue
-
-            state = self.vehicles[new_vehicle_id]
-
-            if state.frames_seen < self.turn_recovery_confirm_frames:
-                continue
-
-            recovery_candidate_id = self._find_recovery_candidate(
-                new_vehicle_id, frame_diagonal, seen_vehicle_ids
-            )
-
-            if recovery_candidate_id is not None:
-                recovery_state = self.vehicles[recovery_candidate_id]
-                recovery_gap = state.first_frame - recovery_state.last_seen_frame
-                predicted_center = recovery_state.predicted_center(state.first_frame)
-                recovery_distance = math.dist(
-                    predicted_center or recovery_state.last_center,
-                    state.first_center,
-                )
-                recovery_distance_ratio = recovery_distance / frame_diagonal
-
-                self._merge_vehicle_ids(recovery_candidate_id, new_vehicle_id)
-
-                logger.info(
-                    (
-                        "Восстановлена потерянная машина: vehicle_id=%d "
-                        "removed_vehicle_id=%d gap=%d "
-                        "distance_ratio=%.4f frame=%d"
-                    ),
-                    recovery_candidate_id,
-                    new_vehicle_id,
-                    recovery_gap,
-                    recovery_distance_ratio,
-                    frame_number,
-                )
-
-                seen_vehicle_ids.discard(new_vehicle_id)
-                seen_vehicle_ids.add(recovery_candidate_id)
-                self.pending_recovery_vehicle_ids.discard(new_vehicle_id)
+            seen_vehicle_ids.add(vehicle_id)
 
         # Одного совпадения недостаточно: оно может возникнуть при случайном пересечении рамок.
         concurrent_merge_candidates: list[tuple[int, int]] = []
@@ -253,6 +155,9 @@ class VehicleCounter:
         ):
             first_state = self.vehicles[first_vehicle_id]
             second_state = self.vehicles[second_vehicle_id]
+
+            if first_state.finalized or second_state.finalized:
+                continue
 
             tracks_match = concurrent_tracks_match(first_state, second_state)
 
@@ -265,13 +170,7 @@ class VehicleCounter:
                 pair, (0, -1)
             )
 
-            evidence_max_gap = (
-                self.large_vehicle_evidence_max_gap
-                if self._allows_interrupted_bus_evidence(first_state, second_state)
-                else 1
-            )
-
-            if previous_frame >= frame_number - evidence_max_gap:
+            if previous_frame == frame_number - 1:
                 consecutive_count = previous_count + 1
             else:
                 consecutive_count = 1
@@ -318,75 +217,71 @@ class VehicleCounter:
             seen_vehicle_ids.discard(secondary_vehicle_id)
             seen_vehicle_ids.add(primary_vehicle_id)
 
-        stale_pairs: list[tuple[int, int]] = []
+        self.concurrent_pair_evidence = {
+            pair: evidence
+            for pair, evidence in self.concurrent_pair_evidence.items()
+            if evidence[1] >= frame_number - self.concurrent_merge_frames
+            and pair[0] in self.vehicles
+            and pair[1] in self.vehicles
+        }
 
-        for pair, (_, last_match_frame) in self.concurrent_pair_evidence.items():
-            first_vehicle_id, second_vehicle_id = pair
-
-            if (
-                first_vehicle_id not in self.vehicles
-                or second_vehicle_id not in self.vehicles
-            ):
-                stale_pairs.append(pair)
+        # В эталоне восстановление потерянного трека выполняется после объединения
+        # одновременных дублирующихся рамок.
+        for new_vehicle_id in sorted(tuple(seen_vehicle_ids)):
+            if new_vehicle_id not in self.vehicles:
                 continue
 
-            evidence_max_gap = (
-                self.large_vehicle_evidence_max_gap
-                if self._allows_interrupted_bus_evidence(
-                    self.vehicles[first_vehicle_id],
-                    self.vehicles[second_vehicle_id],
-                )
-                else 1
+            recovery_candidate_id = self._find_recovery_candidate(
+                new_vehicle_id,
+                frame_diagonal,
+                seen_vehicle_ids,
             )
 
-            if last_match_frame < frame_number - evidence_max_gap:
-                stale_pairs.append(pair)
+            if recovery_candidate_id is None:
+                continue
 
-        for pair in stale_pairs:
-            self.concurrent_pair_evidence.pop(pair)
+            new_state = self.vehicles[new_vehicle_id]
+            recovery_state = self.vehicles[recovery_candidate_id]
+            recovery_gap = new_state.first_frame - recovery_state.last_seen_frame
+            predicted_center = recovery_state.predicted_center(new_state.first_frame)
+            recovery_distance = math.dist(
+                predicted_center or recovery_state.last_center,
+                new_state.first_center,
+            )
+            recovery_distance_ratio = recovery_distance / frame_diagonal
 
-        self._finalize_stale_tracks(frame_number)
+            self._merge_vehicle_ids(recovery_candidate_id, new_vehicle_id)
+
+            logger.info(
+                (
+                    "Восстановлена потерянная машина: vehicle_id=%d "
+                    "removed_vehicle_id=%d gap=%d distance_ratio=%.4f frame=%d"
+                ),
+                recovery_candidate_id,
+                new_vehicle_id,
+                recovery_gap,
+                recovery_distance_ratio,
+                frame_number,
+            )
+
+            seen_vehicle_ids.discard(new_vehicle_id)
+            seen_vehicle_ids.add(recovery_candidate_id)
+
+        self._finalize_stale_tracks(frame_number, frame_diagonal)
+
+        # После объединений подписи должны показывать актуальный внутренний ID.
+        for detection in detections:
+            if detection.track_id is not None:
+                detection.vehicle_id = self.raw_to_vehicle.get(detection.track_id)
 
     def get_total(self) -> int:
-        """Возвращает количество подтверждённых транспортных средств."""
-        return len(self.counted_vehicle_ids)
-
-    def _allows_interrupted_bus_evidence(
-        self,
-        first_state: TrackState,
-        second_state: TrackState,
-    ) -> bool:
-        """Проверяет, могут ли рамки быть большой и малой частями одного автобуса."""
-        first_class = first_state.stable_class_name()
-        second_class = second_state.stable_class_name()
-
-        if first_class != "bus" or second_class != "bus":
-            return False
-
-        if first_state.last_box is None or second_state.last_box is None:
-            return False
-
-        smaller_coverage = calculate_smaller_coverage(
-            first_state.last_box,
-            second_state.last_box,
-        )
-        size_ratio = max(
-            first_state.last_box_area,
-            second_state.last_box_area,
-        ) / max(
-            min(first_state.last_box_area, second_state.last_box_area),
-            1.0,
-        )
-        appearance_similarity = calculate_histogram_similarity(
-            first_state.appearance_histogram,
-            second_state.appearance_histogram,
-        )
-
-        return (
-            smaller_coverage >= self.interrupted_bus_min_smaller_coverage
-            and size_ratio >= self.interrupted_bus_min_size_ratio
-            and appearance_similarity >= self.interrupted_bus_min_appearance_similarity
-        )
+        """Возвращает завершённые и активные подтверждённые машины."""
+        active_valid_vehicle_ids = {
+            vehicle_id
+            for vehicle_id, state in self.vehicles.items()
+            if not state.finalized and self._track_is_valid(state, self.frame_diagonal)
+        }
+        return len(self.counted_vehicle_ids | active_valid_vehicle_ids)
 
     def _find_recovery_candidate(
         self,
@@ -410,9 +305,6 @@ class VehicleCounter:
 
         # Видимая сейчас машина не может быть потерянным предшественником нового трека.
         for old_vehicle_id, old_state in self.vehicles.items():
-            if old_state.frames_seen < self.turn_recovery_confirm_frames:
-                continue
-
             if old_state.finalized or old_vehicle_id in seen_vehicle_ids:
                 continue
 
@@ -492,11 +384,7 @@ class VehicleCounter:
             if gap <= 0 or gap > self.stitch_max_gap:
                 continue
 
-            if (
-                state.last_box is None
-                or state.last_center is None
-                or state.last_box_area <= 0.0
-            ):
+            if state.last_box is None or state.last_box_area <= 0.0:
                 continue
 
             predicted_center = state.predicted_center(frame_number)
@@ -504,9 +392,7 @@ class VehicleCounter:
             if predicted_center is None:
                 continue
 
-            predicted_distance = math.dist(predicted_center, center)
-            direct_distance = math.dist(state.last_center, center)
-            distance_ratio = min(predicted_distance, direct_distance) / frame_diagonal
+            distance_ratio = math.dist(predicted_center, center) / frame_diagonal
             overlap = calculate_iou(state.last_box, box)
             appearance_similarity = calculate_histogram_similarity(
                 state.appearance_histogram,
@@ -548,7 +434,65 @@ class VehicleCounter:
 
         return best_vehicle_id
 
-    def _finalize_stale_tracks(self, frame_number: int) -> None:
+    def _track_is_valid(
+        self,
+        state: TrackState,
+        frame_diagonal: float,
+    ) -> bool:
+        """Применяет те же критерии принятия трека, что и эталон."""
+        return (
+            state.frames_seen >= self.min_confirmed_frames
+            and state.displacement_ratio(frame_diagonal) >= self.min_movement_ratio
+            and state.pixel_motion_frames >= self.min_pixel_motion_frames
+            and state.best_crop is not None
+        )
+
+    def _finalize_track(
+        self,
+        vehicle_id: int,
+        state: TrackState,
+        frame_diagonal: float,
+        completion_reason: str,
+    ) -> None:
+        """Завершает трек и засчитывает его, если он прошёл проверки."""
+        if state.finalized:
+            return
+
+        state.finalized = True
+
+        if not self._track_is_valid(state, frame_diagonal):
+            logger.info(
+                (
+                    "Трек отклонён: vehicle_id=%d frames=%d "
+                    "movement_ratio=%.4f motion_frames=%d has_crop=%s reason=%s"
+                ),
+                vehicle_id,
+                state.frames_seen,
+                state.displacement_ratio(frame_diagonal),
+                state.pixel_motion_frames,
+                state.best_crop is not None,
+                completion_reason,
+            )
+            return
+
+        self.counted_vehicle_ids.add(vehicle_id)
+        logger.info(
+            (
+                "Машина подтверждена: vehicle_id=%d frames=%d "
+                "movement_ratio=%.4f motion_frames=%d reason=%s"
+            ),
+            vehicle_id,
+            state.frames_seen,
+            state.displacement_ratio(frame_diagonal),
+            state.pixel_motion_frames,
+            completion_reason,
+        )
+
+    def _finalize_stale_tracks(
+        self,
+        frame_number: int,
+        frame_diagonal: float,
+    ) -> None:
         """Закрывает состояния, которые давно не появлялись в кадре."""
         for vehicle_id, state in self.vehicles.items():
             missing_frames = frame_number - state.last_seen_frame
@@ -556,8 +500,12 @@ class VehicleCounter:
             if state.finalized or missing_frames < self.max_missing_frames:
                 continue
 
-            state.finalized = True
-            self.pending_recovery_vehicle_ids.discard(vehicle_id)
+            self._finalize_track(
+                vehicle_id,
+                state,
+                frame_diagonal,
+                "track_lost",
+            )
             logger.info(
                 "Трек завершён: vehicle_id=%d missing_frames=%d frame=%d",
                 vehicle_id,
@@ -567,8 +515,13 @@ class VehicleCounter:
 
     def finalize_all(self) -> None:
         """Закрывает оставшиеся активные состояния после окончания видео."""
-        for state in self.vehicles.values():
-            state.finalized = True
+        for vehicle_id, state in self.vehicles.items():
+            self._finalize_track(
+                vehicle_id,
+                state,
+                self.frame_diagonal,
+                "video_ended",
+            )
 
     def _merge_vehicle_states(
         self, primary_state: TrackState, secondary_state: TrackState
@@ -591,27 +544,32 @@ class VehicleCounter:
             primary_state.last_box = secondary_state.last_box
             primary_state.last_box_area = secondary_state.last_box_area
 
-        displacement_candidates = [
+        candidate_centers = [
+            center
+            for center in (
+                primary_state.first_center,
+                primary_state.last_center,
+                secondary_state.first_center,
+                secondary_state.last_center,
+            )
+            if center is not None
+        ]
+        cross_displacement = (
+            max(
+                (
+                    math.dist(primary_state.first_center, center)
+                    for center in candidate_centers
+                ),
+                default=0.0,
+            )
+            if primary_state.first_center is not None
+            else 0.0
+        )
+        primary_state.max_displacement_pixels = max(
             primary_state.max_displacement_pixels,
             secondary_state.max_displacement_pixels,
-        ]
-
-        if primary_state.first_center is not None:
-            if secondary_state.first_center is not None:
-                distance_to_secondary_first = math.dist(
-                    primary_state.first_center,
-                    secondary_state.first_center,
-                )
-                displacement_candidates.append(distance_to_secondary_first)
-
-            if secondary_state.last_center is not None:
-                distance_to_secondary_last = math.dist(
-                    primary_state.first_center,
-                    secondary_state.last_center,
-                )
-                displacement_candidates.append(distance_to_secondary_last)
-
-        primary_state.max_displacement_pixels = max(displacement_candidates)
+            cross_displacement,
+        )
 
         if tracks_overlap:
             primary_state.pixel_motion_frames = max(
@@ -677,8 +635,12 @@ class VehicleCounter:
         for observed_frame in sorted(centers_by_frame):
             centers = centers_by_frame[observed_frame]
 
-            average_center_x = sum(center[0] for center in centers) / len(centers)
-            average_center_y = sum(center[1] for center in centers) / len(centers)
+            average_center_x = round(
+                sum(center[0] for center in centers) / len(centers)
+            )
+            average_center_y = round(
+                sum(center[1] for center in centers) / len(centers)
+            )
 
             merged_recent_centers.append(
                 (
@@ -694,8 +656,6 @@ class VehicleCounter:
         if secondary_state.best_crop_score > primary_state.best_crop_score:
             primary_state.best_crop = secondary_state.best_crop
             primary_state.best_crop_score = secondary_state.best_crop_score
-
-        primary_state.finalized = primary_state.finalized and secondary_state.finalized
 
     def _merge_vehicle_ids(
         self, primary_vehicle_id: int, secondary_vehicle_id: int
@@ -720,8 +680,6 @@ class VehicleCounter:
         if was_counted:
             self.counted_vehicle_ids.add(primary_vehicle_id)
             self.counted_vehicle_ids.discard(secondary_vehicle_id)
-
-        self.pending_recovery_vehicle_ids.discard(secondary_vehicle_id)
 
         for pair in list(self.concurrent_pair_evidence):
             if secondary_vehicle_id in pair:
