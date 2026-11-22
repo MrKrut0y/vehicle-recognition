@@ -30,7 +30,7 @@ def save_vehicle_images(
 
         if not encoded_successfully:
             logger.warning(
-                "Не удалось сохранить снимок машины: vehicle_id=%d path=%s",
+                "Could not encode vehicle image: vehicle_id=%d path=%s",
                 vehicle_id,
                 output_path,
             )
@@ -41,7 +41,7 @@ def save_vehicle_images(
             encoded_image.tofile(str(output_path))
         except OSError:
             logger.exception(
-                "Не удалось записать снимок машины: vehicle_id=%d path=%s",
+                "Could not write vehicle image: vehicle_id=%d path=%s",
                 vehicle_id,
                 output_path,
             )

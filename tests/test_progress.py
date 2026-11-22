@@ -18,10 +18,10 @@ def test_print_progress_shows_percentage_and_vehicle_count(capsys):
     output = capsys.readouterr().out
 
     assert output.startswith("\r")
-    assert "50.00%" in output
-    assert "Кадр: 50/100" in output
-    assert "Машин: 7" in output
-    assert "Осталось: 00:00:20" in output
+    assert "50.0%" in output
+    assert "frames 50/100" in output
+    assert "vehicles 7" in output
+    assert "remaining 00:20" in output
 
 
 def test_print_progress_handles_unknown_total_frame_count(capsys):
@@ -34,7 +34,9 @@ def test_print_progress_handles_unknown_total_frame_count(capsys):
 
     output = capsys.readouterr().out
 
-    assert output == "\rКадр: 25 | Машин: 3 | Осталось: неизвестно"
+    assert output == (
+        "\rFrames: 25 | elapsed 00:10 |   2.5 FPS | vehicles 3 | stitched 0"
+    )
 
 
 def test_print_progress_does_not_exceed_one_hundred_percent(capsys):
@@ -47,8 +49,8 @@ def test_print_progress_does_not_exceed_one_hundred_percent(capsys):
 
     output = capsys.readouterr().out
 
-    assert "100.00%" in output
-    assert "Осталось: 00:00:00" in output
+    assert "100.0%" in output
+    assert "remaining 00:00" in output
 
 
 def test_estimate_remaining_seconds_uses_average_frame_time():
@@ -63,3 +65,4 @@ def test_estimate_remaining_seconds_uses_average_frame_time():
 
 def test_format_duration_includes_hours_minutes_and_seconds():
     assert format_duration(3660.2) == "01:01:01"
+    assert format_duration(20.0) == "00:20"

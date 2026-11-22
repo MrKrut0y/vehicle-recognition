@@ -65,19 +65,26 @@ def main() -> None:
 
     configure_logging(arguments.verbose, arguments.log_file)
 
-    logger.info(
-        "Запуск обработки: source=%s output=%s images_dir=%s log_file=%s show=%s",
-        arguments.source,
-        arguments.output,
-        arguments.images_dir,
-        arguments.log_file,
-        arguments.show,
-    )
+    logger.info("Source: %s", arguments.source)
 
     file_source = FileSource(arguments.source)
 
     if not file_source.read_metadata():
         return
+
+    logger.info(
+        "Frames: %s | FPS: %.2f",
+        file_source.total_frames if file_source.total_frames else "unknown",
+        file_source.fps or 0.0,
+    )
+    logger.info("Tracker: tracker_static_reid.yaml")
+    logger.info(
+        "Output: video=%s images=%s log=%s show=%s",
+        arguments.output,
+        arguments.images_dir,
+        arguments.log_file,
+        arguments.show,
+    )
 
     model_path = "yolov8s.pt"
     detector = VehicleDetector(model_path)
@@ -104,6 +111,7 @@ def main() -> None:
 
             counter.update(detections, frame_size, frame_number)
             total = counter.get_total()
+            stitched_count = counter.get_stitched_id_count()
 
             is_first_frame = frame_number == 1
             is_update_frame = frame_number % 10 == 0
@@ -112,20 +120,22 @@ def main() -> None:
             if is_first_frame or is_update_frame or is_last_frame:
                 elapsed_seconds = time.perf_counter() - started_at
 
-                if arguments.verbose:
-                    progress_message = build_progress_message(
-                        frame_number,
-                        file_source.total_frames,
-                        total,
-                        elapsed_seconds,
-                    )
-                    logger.info("Прогресс: %s", progress_message)
-                else:
+                progress_message = build_progress_message(
+                    frame_number,
+                    file_source.total_frames,
+                    total,
+                    elapsed_seconds,
+                    stitched_count,
+                )
+                logger.info("%s", progress_message)
+
+                if not arguments.verbose:
                     print_progress(
                         frame_number,
                         file_source.total_frames,
                         total,
                         elapsed_seconds,
+                        stitched_count,
                     )
 
             annotated_frame = draw_detections(frame, detections, total)
@@ -172,7 +182,7 @@ def main() -> None:
 
     logger.info(
         (
-            "Обработка завершена: frames=%d vehicles=%d "
+            "Processing completed: frames=%d vehicles=%d "
             "elapsed=%.2fs average_fps=%.2f output=%s images=%d"
         ),
         processed_frames,
@@ -182,12 +192,14 @@ def main() -> None:
         arguments.output,
         len(saved_image_paths),
     )
+    logger.info("Accepted observations: %d", counter.get_total())
+    logger.info("Saved vehicle images: %d", len(saved_image_paths))
 
     if not arguments.verbose:
         print()
 
-    print(f"Итоговое количество транспортных средств: {counter.get_total()}")
-    print(f"Сохранено снимков транспортных средств: {len(saved_image_paths)}")
+    print(f"Accepted observations: {counter.get_total()}")
+    print(f"Saved vehicle images: {len(saved_image_paths)}")
 
 
 if __name__ == "__main__":

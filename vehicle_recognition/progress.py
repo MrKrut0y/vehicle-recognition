@@ -2,12 +2,15 @@ import math
 
 
 def format_duration(seconds: float) -> str:
-    """Преобразует продолжительность в формат ЧЧ:ММ:СС."""
+    """Преобразует продолжительность в формат эталонной программы."""
     total_seconds = max(math.ceil(seconds), 0)
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def estimate_remaining_seconds(
@@ -35,6 +38,7 @@ def build_progress_message(
     total_frames: int | None,
     vehicle_count: int,
     elapsed_seconds: float,
+    stitched_count: int = 0,
 ) -> str:
     """Формирует одинаковое сообщение для обычного и подробного режимов."""
     remaining_seconds = estimate_remaining_seconds(
@@ -45,13 +49,16 @@ def build_progress_message(
     remaining_text = (
         format_duration(remaining_seconds)
         if remaining_seconds is not None
-        else "неизвестно"
+        else "unknown"
     )
+
+    processing_fps = frame_number / max(elapsed_seconds, 1e-9)
 
     if total_frames is None or total_frames <= 0:
         return (
-            f"Кадр: {frame_number} | Машин: {vehicle_count} | "
-            f"Осталось: {remaining_text}"
+            f"Frames: {frame_number} | elapsed {format_duration(elapsed_seconds)} | "
+            f"{processing_fps:5.1f} FPS | vehicles {vehicle_count} | "
+            f"stitched {stitched_count}"
         )
 
     progress_percent = min(
@@ -60,10 +67,11 @@ def build_progress_message(
     )
 
     return (
-        f"Обработано: {progress_percent:6.2f}% | "
-        f"Кадр: {frame_number}/{total_frames} | "
-        f"Машин: {vehicle_count} | "
-        f"Осталось: {remaining_text}"
+        f"Progress: {progress_percent:5.1f}% | "
+        f"frames {frame_number}/{total_frames} | "
+        f"{processing_fps:5.1f} FPS | "
+        f"remaining {remaining_text} | "
+        f"vehicles {vehicle_count} | stitched {stitched_count}"
     )
 
 
@@ -72,6 +80,7 @@ def print_progress(
     total_frames: int | None,
     vehicle_count: int,
     elapsed_seconds: float,
+    stitched_count: int = 0,
 ) -> None:
     """Выводит прогресс обработки в одной строке терминала."""
     message = build_progress_message(
@@ -79,6 +88,7 @@ def print_progress(
         total_frames,
         vehicle_count,
         elapsed_seconds,
+        stitched_count,
     )
 
     print(f"\r{message}", end="", flush=True)

@@ -17,13 +17,13 @@ class FileSource:
     def read_metadata(self) -> bool:
         """Читает параметры видео без последовательного получения кадров."""
         if not self.source.is_file():
-            logger.error("Файл не найден: %s", self.source)
+            logger.error("Input video not found: %s", self.source)
             return False
 
         capture = cv2.VideoCapture(str(self.source))
 
         if not capture.isOpened():
-            logger.error("Не удалось открыть видео: %s", self.source)
+            logger.error("Could not open input video: %s", self.source)
             capture.release()
             return False
 
@@ -33,36 +33,23 @@ class FileSource:
         finally:
             capture.release()
 
-        logger.info(
-            "Видео открыто: source=%s frames=%d fps=%.2f",
-            self.source,
-            self.total_frames,
-            self.fps,
-        )
         return True
 
     def generate_frames(self):
         """Генерирует кадры видео и освобождает ресурс после завершения."""
         if not self.source.is_file():
-            logger.error("Файл не найден: %s", self.source)
+            logger.error("Input video not found: %s", self.source)
             return
 
         capture = cv2.VideoCapture(str(self.source))
 
         if not capture.isOpened():
-            logger.error("Не удалось открыть видео: %s", self.source)
+            logger.error("Could not open input video: %s", self.source)
             capture.release()
             return
 
         self.fps = capture.get(cv2.CAP_PROP_FPS)
         self.total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        logger.info(
-            "Видео открыто: source=%s frames=%d fps=%.2f",
-            self.source,
-            self.total_frames,
-            self.fps,
-        )
 
         try:
             while True:

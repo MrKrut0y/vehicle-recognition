@@ -13,7 +13,7 @@ def test_file_source_returns_no_frames_for_missing_file(tmp_path, caplog):
 
     assert frames == []
     assert file_source.fps is None
-    assert f"Файл не найден: {source_path}" in caplog.text
+    assert f"Input video not found: {source_path}" in caplog.text
 
 
 def test_file_source_reads_frames_and_releases_capture(tmp_path, monkeypatch):
@@ -62,7 +62,7 @@ def test_file_source_releases_capture_when_video_cannot_be_opened(
         frames = list(file_source.generate_frames())
 
     assert frames == []
-    assert f"Не удалось открыть видео: {source_path}" in caplog.text
+    assert f"Could not open input video: {source_path}" in caplog.text
     capture.release.assert_called_once_with()
 
 

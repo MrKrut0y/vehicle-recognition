@@ -64,6 +64,7 @@ def test_merge_vehicle_ids_remaps_tracker_ids():
         202: 1,
         203: 1,
     }
+    assert counter.get_stitched_id_count() == 2
 
 
 def test_merge_vehicle_ids_removes_secondary_vehicle_and_related_state():

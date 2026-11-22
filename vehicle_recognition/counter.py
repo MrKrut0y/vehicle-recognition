@@ -112,7 +112,7 @@ class VehicleCounter:
                     self.vehicles[vehicle_id] = TrackState()
 
                     logger.info(
-                        "Создан кандидат: vehicle_id=%d tracker_id=%d frame=%d",
+                        "Candidate created: vehicle_id=%d tracker_id=%d frame=%d",
                         vehicle_id,
                         tracker_id,
                         frame_number,
@@ -121,7 +121,7 @@ class VehicleCounter:
                     self.raw_to_vehicle[tracker_id] = vehicle_id
                     logger.info(
                         (
-                            "Новый ID трекера привязан к машине: "
+                            "Tracker ID stitched: "
                             "vehicle_id=%d tracker_id=%d frame=%d"
                         ),
                         vehicle_id,
@@ -205,7 +205,7 @@ class VehicleCounter:
 
             logger.info(
                 (
-                    "Объединены одновременные треки: vehicle_id=%d "
+                    "Concurrent tracks merged: vehicle_id=%d "
                     "removed_vehicle_id=%d evidence_frames=%d frame=%d"
                 ),
                 primary_vehicle_id,
@@ -254,7 +254,7 @@ class VehicleCounter:
 
             logger.info(
                 (
-                    "Восстановлена потерянная машина: vehicle_id=%d "
+                    "Lost vehicle recovered: vehicle_id=%d "
                     "removed_vehicle_id=%d gap=%d distance_ratio=%.4f frame=%d"
                 ),
                 recovery_candidate_id,
@@ -282,6 +282,11 @@ class VehicleCounter:
             if not state.finalized and self._track_is_valid(state, self.frame_diagonal)
         }
         return len(self.counted_vehicle_ids | active_valid_vehicle_ids)
+
+    def get_stitched_id_count(self) -> int:
+        """Возвращает число ID трекера, объединённых с другими ID."""
+        canonical_vehicle_ids = set(self.raw_to_vehicle.values())
+        return len(self.raw_to_vehicle) - len(canonical_vehicle_ids)
 
     def _find_recovery_candidate(
         self,
@@ -463,7 +468,7 @@ class VehicleCounter:
         if not self._track_is_valid(state, frame_diagonal):
             logger.info(
                 (
-                    "Трек отклонён: vehicle_id=%d frames=%d "
+                    "Track rejected: vehicle_id=%d frames=%d "
                     "movement_ratio=%.4f motion_frames=%d has_crop=%s reason=%s"
                 ),
                 vehicle_id,
@@ -478,7 +483,7 @@ class VehicleCounter:
         self.counted_vehicle_ids.add(vehicle_id)
         logger.info(
             (
-                "Машина подтверждена: vehicle_id=%d frames=%d "
+                "Vehicle accepted: vehicle_id=%d frames=%d "
                 "movement_ratio=%.4f motion_frames=%d reason=%s"
             ),
             vehicle_id,
@@ -507,7 +512,7 @@ class VehicleCounter:
                 "track_lost",
             )
             logger.info(
-                "Трек завершён: vehicle_id=%d missing_frames=%d frame=%d",
+                "Track finalized: vehicle_id=%d missing_frames=%d frame=%d",
                 vehicle_id,
                 missing_frames,
                 frame_number,
