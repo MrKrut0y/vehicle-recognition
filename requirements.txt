@@ -2,3 +2,5 @@ ultralytics==8.4.197
 opencv-python==5.0.0.93
 lap==0.5.13
 numpy==2.5.4
+mysql-connector-python==26.10.0
+python-dotenv==1.2.4

@@ -12,10 +12,10 @@ def save_vehicle_images(
     output_directory: Path,
     vehicle_ids: set[int],
     vehicles: dict[int, TrackState],
-) -> list[Path]:
+) -> dict[int, Path]:
     """Сохраняет лучший кадр каждой подтверждённой машины."""
     output_directory.mkdir(parents=True, exist_ok=True)
-    saved_paths: list[Path] = []
+    saved_paths: dict[int, Path] = {}
 
     for vehicle_id in sorted(vehicle_ids):
         state = vehicles.get(vehicle_id)
@@ -47,6 +47,6 @@ def save_vehicle_images(
             )
             continue
 
-        saved_paths.append(output_path)
+        saved_paths[vehicle_id] = output_path
 
     return saved_paths

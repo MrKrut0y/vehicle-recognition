@@ -279,6 +279,7 @@ def test_stale_track_is_finalized_after_missing_frame_limit():
     counter.update([], (100, 100), 4)
 
     assert counter.vehicles[1].finalized is True
+    assert counter.vehicles[1].completion_reason == "track_lost"
 
 
 def test_unmatched_recovery_candidate_remains_separate():

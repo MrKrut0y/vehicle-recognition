@@ -464,6 +464,7 @@ class VehicleCounter:
             return
 
         state.finalized = True
+        state.completion_reason = completion_reason
 
         if not self._track_is_valid(state, frame_diagonal):
             logger.info(

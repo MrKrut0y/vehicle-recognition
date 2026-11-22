@@ -33,6 +33,7 @@ class TrackState:
     best_crop: np.ndarray | None = field(default=None, repr=False, compare=False)
     best_crop_score: float = 0.0
     finalized: bool = False
+    completion_reason: str | None = None
     # Короткая история нужна для оценки скорости и направления без хранения всего трека.
     recent_centers: deque[tuple[int, tuple[float, float]]] = field(
         default_factory=lambda: deque(maxlen=8)

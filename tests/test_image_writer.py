@@ -18,6 +18,6 @@ def test_save_vehicle_images_writes_only_confirmed_states_with_crops(tmp_path):
         {1: saved_state, 2: empty_state},
     )
 
-    assert saved_paths == [tmp_path / "vehicle_0001_car.jpg"]
-    assert saved_paths[0].is_file()
-    assert cv2.imread(str(saved_paths[0])) is not None
+    assert saved_paths == {1: tmp_path / "vehicle_0001_car.jpg"}
+    assert saved_paths[1].is_file()
+    assert cv2.imread(str(saved_paths[1])) is not None

@@ -59,6 +59,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--verbose` | Нет | Выводить подробный журнал событий вместо однострочного прогресса |
 | `--images-dir` | Нет | Каталог для лучших снимков подтверждённых машин; по умолчанию `results/vehicle_images` |
 | `--log-file` | Нет | Файл подробного журнала; по умолчанию `results/vehicle_recognition.log` |
+| `--save-to-database` | Нет | Сохранить запуск и подтверждённые наблюдения в MySQL |
 
 При использовании `--show` нажмите `q`, чтобы досрочно остановить обработку.
 Работа без показа кадров обычно выполняется быстрее.
@@ -90,6 +91,37 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 ```powershell
 pytest
 ```
+
+### Локальная база данных
+
+Для запуска MySQL 8.4 нужны Docker Desktop и локальный файл `.env`,
+созданный по образцу `.env.example`.
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+Сервер доступен только на этом компьютере по адресу `127.0.0.1:3306`.
+Остановка сервера без удаления данных:
+
+```powershell
+docker compose down
+```
+
+На пустой базе Docker автоматически применяет SQL-файлы из `database/init`.
+Схема хранит камеры, запуски обработки, подтверждённые наблюдения и временные
+ID трекера. Первоначальная схема находится в `database/init/001_initial_schema.sql`.
+
+После запуска контейнера результаты можно сохранить командой:
+
+```powershell
+python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
+```
+
+Файл `.env` используется одновременно Docker Compose и Python-приложением.
+При успешной обработке база получает запись запуска, подтверждённые наблюдения
+машин и все временные ID трекера, которые были объединены в каждую машину.
 
 Локальные видеозаписи, веса моделей и результаты обработки не добавляются в
 репозиторий. Их расположение задаётся пользователем при запуске.
@@ -152,6 +184,7 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 | `--verbose` | No | Print detailed tracking events instead of the one-line progress display |
 | `--images-dir` | No | Directory for the best confirmed-vehicle images; defaults to `results/vehicle_images` |
 | `--log-file` | No | Detailed processing log; defaults to `results/vehicle_recognition.log` |
+| `--save-to-database` | No | Save the run and confirmed observations to MySQL |
 
 Press `q` to stop early when `--show` is enabled. Processing without the live
 preview is usually faster.
@@ -160,6 +193,25 @@ preview is usually faster.
 
 ```powershell
 pytest
+```
+
+### Local database
+
+Start the MySQL 8.4 development server with Docker Compose:
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+The server is available only on the local machine at `127.0.0.1:3306`.
+Initial SQL files from `database/init` are applied automatically when Docker
+creates an empty database volume.
+
+Save processing results after the database container becomes healthy:
+
+```powershell
+python -m vehicle_recognition.main ".\videos\test3.mp4" --save-to-database
 ```
 
 Local videos, model weights, and generated results are excluded from the

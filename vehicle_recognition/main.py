@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 
 from vehicle_recognition.counter import VehicleCounter
+from vehicle_recognition.database import MySQLRepository
 from vehicle_recognition.detector import VehicleDetector
 from vehicle_recognition.file_source import FileSource
 from vehicle_recognition.image_writer import save_vehicle_images
@@ -56,6 +57,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Файл для подробного журнала обработки.",
     )
 
+    parser.add_argument(
+        "--save-to-database",
+        action="store_true",
+        help="Сохранять результаты обработки в MySQL.",
+    )
+
     return parser.parse_args()
 
 
@@ -79,10 +86,11 @@ def main() -> None:
     )
     logger.info("Tracker: tracker_static_reid.yaml")
     logger.info(
-        "Output: video=%s images=%s log=%s show=%s",
+        "Output: video=%s images=%s log=%s database=%s show=%s",
         arguments.output,
         arguments.images_dir,
         arguments.log_file,
+        arguments.save_to_database,
         arguments.show,
     )
 
@@ -91,6 +99,18 @@ def main() -> None:
     motion_analyzer = PixelMotionAnalyzer()
 
     counter = VehicleCounter()
+
+    database_repository: MySQLRepository | None = None
+    database_run_id: int | None = None
+
+    if arguments.save_to_database:
+        database_repository = MySQLRepository.from_environment()
+        database_run_id = database_repository.create_run(
+            source_name=str(arguments.source.resolve()),
+            total_frames=file_source.total_frames,
+            source_fps=file_source.fps,
+        )
+        logger.info("Database run created: run_id=%d", database_run_id)
 
     video_writer: VideoFileWriter | None = None
 
@@ -162,6 +182,20 @@ def main() -> None:
                 cv2.imshow("Vehicle detection", annotated_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
+    except Exception as error:
+        if database_repository is not None and database_run_id is not None:
+            try:
+                database_repository.fail_run(
+                    database_run_id,
+                    processed_frames,
+                    error,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not mark database run as failed: run_id=%d",
+                    database_run_id,
+                )
+        raise
     finally:
         # Освобождаем ресурсы даже при ошибке или досрочном завершении обработки.
         if video_writer is not None:
@@ -170,15 +204,42 @@ def main() -> None:
         if arguments.show:
             cv2.destroyAllWindows()
 
-    elapsed_seconds = time.perf_counter() - started_at
-    average_fps = processed_frames / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    try:
+        elapsed_seconds = time.perf_counter() - started_at
+        average_fps = processed_frames / elapsed_seconds if elapsed_seconds > 0 else 0.0
 
-    counter.finalize_all()
-    saved_image_paths = save_vehicle_images(
-        arguments.images_dir,
-        counter.counted_vehicle_ids,
-        counter.vehicles,
-    )
+        counter.finalize_all()
+        saved_image_paths = save_vehicle_images(
+            arguments.images_dir,
+            counter.counted_vehicle_ids,
+            counter.vehicles,
+        )
+
+        if database_repository is not None and database_run_id is not None:
+            database_repository.complete_run(
+                run_id=database_run_id,
+                processed_frames=processed_frames,
+                source_fps=file_source.fps or 30.0,
+                vehicle_ids=counter.counted_vehicle_ids,
+                vehicles=counter.vehicles,
+                frame_diagonal=counter.frame_diagonal,
+                image_paths=saved_image_paths,
+            )
+            logger.info("Database run completed: run_id=%d", database_run_id)
+    except Exception as error:
+        if database_repository is not None and database_run_id is not None:
+            try:
+                database_repository.fail_run(
+                    database_run_id,
+                    processed_frames,
+                    error,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not mark database run as failed: run_id=%d",
+                    database_run_id,
+                )
+        raise
 
     logger.info(
         (
