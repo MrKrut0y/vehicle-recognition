@@ -18,12 +18,40 @@
 
 Проект разрабатывается поэтапно. Каждая функция сначала проверяется на локальной видеозаписи.
 
-### Установка зависимостей
+### Требования и установка
+
+Проверенные версии Python: 3.13 и 3.14, 64-bit. Для обычной обработки видео
+Docker не нужен. Docker Desktop требуется только для локального запуска MySQL
+и использования аргумента `--save-to-database`.
+
+Клонируйте проект и перейдите в его каталог:
+
+```powershell
+git clone https://github.com/MrKrut0y/vehicle-recognition.git
+cd vehicle-recognition
+```
+
+Создайте и активируйте виртуальное окружение:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+Если PowerShell запрещает активацию окружения, разрешите её только для текущего
+окна и повторите команду активации:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\.venv\Scripts\Activate.ps1
+```
+
+Инструменты форматирования и тестирования устанавливаются отдельно:
+
+```powershell
+python -m pip install -r requirements-dev.txt
 ```
 
 ### Обработка на NVIDIA GPU
@@ -59,6 +87,9 @@ GPU: NVIDIA GeForce GTX 1080 Ti
 использует видеокарту, поэтому отдельный аргумент запуска программы не нужен.
 
 ### Запуск
+
+Для запуска без Docker и базы данных не указывайте `--save-to-database` и
+`--camera-name`. Файл `.env` в таком режиме не нужен.
 
 Команда запуска принимает обязательный путь к исходному видео:
 
@@ -142,21 +173,75 @@ python -m vehicle_recognition.main ".\videos\test3.mp4" --output ".\results\test
 
 ### Тесты
 
-Для запуска всех автоматических тестов выполните:
+После установки `requirements-dev.txt` запустите все автоматические тесты:
 
 ```powershell
-pytest
+python -m pytest
 ```
+
+### Частые проблемы
+
+- `Missing database settings` означает, что для режима с
+  `--save-to-database` не найден файл `.env` или в нём не заполнены обязательные
+  параметры MySQL. Файл должен находиться в корне проекта рядом с
+  `compose.yaml`.
+- Если PowerShell не находит команду `docker`, запустите Docker Desktop,
+  дождитесь готовности Docker Engine и откройте новое окно PowerShell.
+- Если проверка PyTorch выводит `CUDA available: False`, приложение работает на
+  процессоре. Проверьте активное виртуальное окружение и переустановите сборку
+  PyTorch с CUDA по инструкции выше.
+- URL трансляции передаётся как обычная строка вида
+  `"https://example.com/live/playlist.m3u8"`. Не вставляйте Markdown-запись
+  `[адрес](адрес)` и не добавляйте обратные слеши перед `:` или `.`.
+- Отдельные сообщения FFmpeg об ошибках H.264, TLS или TCP обычно означают
+  временную потерю пакетов или соединения. Программа повторно подключается к
+  потоку автоматически; постоянные повторения требуют проверки сети и
+  доступности самой камеры.
 
 ### Локальная база данных
 
-Для запуска MySQL 8.4 нужны Docker Desktop и локальный файл `.env`,
-созданный по образцу `.env.example`.
+Для запуска MySQL 8.4 нужны Docker Desktop и локальный файл `.env`. Docker
+Desktop для Windows можно установить командой:
+
+```powershell
+winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
+```
+
+После установки запустите Docker Desktop и дождитесь готовности Docker Engine.
+Для варианта с WSL 2 должны быть включены компоненты Windows Subsystem for Linux
+и Virtual Machine Platform. Подробная официальная инструкция:
+<https://docs.docker.com/desktop/setup/install/windows-install/>.
+
+Файл `.env` содержит локальные пароли и намеренно не хранится в Git. На каждом
+новом компьютере создайте его из шаблона и откройте для редактирования:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Обязательно замените значения `MYSQL_PASSWORD` и `MYSQL_ROOT_PASSWORD`:
+
+```dotenv
+DB_HOST=127.0.0.1
+MYSQL_DATABASE=vehicle_recognition
+MYSQL_USER=vehicle_app
+MYSQL_PASSWORD=your_application_password
+MYSQL_ROOT_PASSWORD=your_root_password
+MYSQL_PORT=3306
+DATABASE_RETENTION_DAYS=30
+```
+
+Не добавляйте `.env` в Git. После сохранения файла запустите MySQL:
 
 ```powershell
 docker compose up -d
 docker compose ps
 ```
+
+Перед запуском приложения дождитесь состояния `healthy` у контейнера
+`vehicle-recognition-mysql`. Если команда `docker` не найдена, запустите Docker
+Desktop и заново откройте PowerShell.
 
 Сервер доступен только на этом компьютере по адресу `127.0.0.1:3306`.
 Остановка сервера без удаления данных:
@@ -164,6 +249,9 @@ docker compose ps
 ```powershell
 docker compose down
 ```
+
+Команда `docker compose down -v` дополнительно удаляет volume `mysql_data` и
+всю базу. Не используйте `-v`, если данные нужно сохранить.
 
 На пустой базе Docker автоматически применяет SQL-файлы из `database/init`.
 Схема хранит камеры, запуски обработки, подтверждённые наблюдения и временные
@@ -186,6 +274,10 @@ python -m vehicle_recognition.main "https://example.com/live/playlist.m3u8" --sa
 изменился.
 
 Файл `.env` используется одновременно Docker Compose и Python-приложением.
+Если приложение сообщает `Missing database settings`, файл `.env` отсутствует,
+сохранён не в корне проекта либо в нём не заполнены обязательные переменные.
+Пароли из `.env` создают пользователей только при первом создании пустого
+volume; последующее изменение файла не меняет пароль в существующей базе.
 При успешной обработке база получает запись запуска, подтверждённые наблюдения
 машин и все временные ID трекера, которые были объединены в каждую машину.
 Во время трансляции завершённые и подтверждённые машины сохраняются сразу, не
@@ -245,12 +337,41 @@ Develop an application that receives video, detects and tracks vehicles, recogni
 
 The project is developed incrementally. Each feature is first tested on a local video recording.
 
-### Installation
+### Requirements and installation
+
+Tested Python versions are 3.13 and 3.14, 64-bit. Docker is not required for
+ordinary video processing. Docker Desktop is only needed to run the local
+MySQL server and use `--save-to-database`.
+
+Clone the repository and enter its directory:
+
+```powershell
+git clone https://github.com/MrKrut0y/vehicle-recognition.git
+cd vehicle-recognition
+```
+
+Create and activate a virtual environment, then install the runtime
+dependencies:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+If PowerShell blocks activation, allow it for the current window only and
+activate the environment again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\.venv\Scripts\Activate.ps1
+```
+
+Install the separate development dependencies before formatting or testing:
+
+```powershell
+python -m pip install -r requirements-dev.txt
 ```
 
 ### NVIDIA GPU acceleration
@@ -286,6 +407,9 @@ Ultralytics automatically uses an available CUDA GPU, so the application does
 not require an additional command-line option.
 
 ### Usage
+
+For a run without Docker or MySQL, omit `--save-to-database` and
+`--camera-name`. The `.env` file is not needed in this mode.
 
 Process a video without saving annotated output:
 
@@ -349,21 +473,84 @@ temporary outage. Processing resumes after the database becomes available.
 ### Tests
 
 ```powershell
-pytest
+python -m pytest
 ```
+
+### Common problems
+
+- `Missing database settings` means that `.env` was not found or required
+  MySQL values are empty. The file must be in the project root next to
+  `compose.yaml`.
+- If PowerShell cannot find `docker`, start Docker Desktop, wait for the Docker
+  Engine to become ready, and open a new PowerShell window.
+- If PyTorch reports `CUDA available: False`, processing uses the CPU. Verify
+  the active virtual environment and reinstall the CUDA-enabled PyTorch build
+  described above.
+- Pass a stream URL as a plain string such as
+  `"https://example.com/live/playlist.m3u8"`. Do not paste Markdown syntax such
+  as `[URL](URL)` or add backslashes before `:` and `.`.
+- Occasional FFmpeg H.264, TLS, or TCP messages normally indicate packet loss
+  or a temporary connection failure. The application reconnects
+  automatically; continuous errors require checking the network and camera
+  availability.
 
 ### Local database
 
-Start the MySQL 8.4 development server with Docker Compose:
+Install Docker Desktop on Windows if it is not already available:
+
+```powershell
+winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
+```
+
+Start Docker Desktop and wait for the Docker Engine. The WSL 2 backend requires
+Windows Subsystem for Linux and Virtual Machine Platform. See the
+[official Windows installation guide](https://docs.docker.com/desktop/setup/install/windows-install/)
+for current requirements.
+
+The local `.env` file contains passwords and is intentionally excluded from
+Git. Create it from the template on every new computer and edit its values:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Replace both example passwords before starting the database:
+
+```dotenv
+DB_HOST=127.0.0.1
+MYSQL_DATABASE=vehicle_recognition
+MYSQL_USER=vehicle_app
+MYSQL_PASSWORD=your_application_password
+MYSQL_ROOT_PASSWORD=your_root_password
+MYSQL_PORT=3306
+DATABASE_RETENTION_DAYS=30
+```
+
+Do not commit `.env`. Start the MySQL 8.4 development server with Docker
+Compose:
 
 ```powershell
 docker compose up -d
 docker compose ps
 ```
 
+Wait until `vehicle-recognition-mysql` reports `healthy` before starting the
+application. If `docker` is not recognized, start Docker Desktop and reopen
+PowerShell.
+
 The server is available only on the local machine at `127.0.0.1:3306`.
 Initial SQL files from `database/init` are applied automatically when Docker
 creates an empty database volume.
+
+Stop the server without deleting its data:
+
+```powershell
+docker compose down
+```
+
+Adding `-v` to this command also deletes the `mysql_data` volume and the entire
+database. Do not use it when the data must be preserved.
 
 Save processing results after the database container becomes healthy:
 
@@ -406,6 +593,12 @@ DATABASE_RETENTION_DAYS=30
 
 Retention runs when the application starts and then every 24 hours during
 continuous processing. Active runs and camera records are never removed.
+
+The same `.env` file is read by Docker Compose and the Python application. The
+`Missing database settings` error means that it is missing from the project
+root or contains empty required values. MySQL users and passwords are created
+only when an empty volume is initialized; changing `.env` later does not alter
+passwords inside an existing database.
 
 Delete only completed results older than a selected number of days:
 
