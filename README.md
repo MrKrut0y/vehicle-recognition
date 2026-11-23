@@ -74,11 +74,11 @@ python -m pip install torch torchvision --index-url https://download.pytorch.org
 python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
 
-Ожидаемый результат для компьютера с GTX 1080 Ti:
+Ожидаемый результат:
 
 ```text
 CUDA available: True
-GPU: NVIDIA GeForce GTX 1080 Ti
+GPU: <название видеокарты NVIDIA>
 ```
 
 Если показано `CUDA available: False`, программа будет работать на процессоре.
@@ -394,11 +394,11 @@ Verify that PyTorch can access the GPU:
 python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
 
-Expected output on the GTX 1080 Ti computer:
+Expected output:
 
 ```text
 CUDA available: True
-GPU: NVIDIA GeForce GTX 1080 Ti
+GPU: <NVIDIA GPU name>
 ```
 
 If `CUDA available: False` is printed, processing will use the CPU. Check the
